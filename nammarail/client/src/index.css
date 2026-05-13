@@ -1,111 +1,158 @@
+/* =============================================================================
+   NammaRail — Global Styles
+   =============================================================================
+   Import order matters for Tailwind:
+     1. @tailwind base       → Resets browser defaults (Preflight)
+     2. @tailwind components → Layer for reusable component classes (.btn, .card…)
+     3. @tailwind utilities  → All utility classes (bg-*, text-*, p-*, etc.)
+   ============================================================================= */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   CSS CUSTOM PROPERTIES — Design Tokens
+   Applied to :root (light mode) and .dark :root (dark mode).
+   Components read these values; Tailwind maps them via tailwind.config.js.
+   ============================================================================= */
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Light mode — warm ivory palette */
+  --bg-primary:     #FAFAF7;
+  --bg-secondary:   #F2F0E8;
+  --bg-tertiary:    #E8E4D8;
+  --brand:          #B8860B;
+  --brand-hover:    #9A7009;
+  --brand-light:    #F5EDD0;
+  --text-primary:   #1A1A18;
+  --text-secondary: #5C5A52;
+  --text-tertiary:  #8A8880;
+  --border:         #E0DDD0;
+}
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+.dark {
+  /* Dark mode — near-black with bright gold accent */
+  --bg-primary:     #0F0F0F;
+  --bg-secondary:   #1A1A1A;
+  --bg-tertiary:    #252525;
+  --brand:          #C9980A;
+  --brand-hover:    #E5B020;
+  --brand-light:    #2A2200;
+  --text-primary:   #F0EDE4;
+  --text-secondary: #A09C90;
+  --text-tertiary:  #6A6860;
+  --border:         #2E2E2E;
+}
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* =============================================================================
+   BASE ELEMENT STYLES
+   ============================================================================= */
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Apply theme background and text globally so no flash of white on dark mode */
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+      Roboto, 'Helvetica Neue', Arial, sans-serif;
+    /* Prevent layout shift from scrollbar appearing/disappearing */
+    overflow-y: scroll;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar — desktop browsers only (not supported on mobile) */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--brand);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--brand-hover);
+  }
+
+  /* Input and select base styling — picks up theme colors */
+  input, select, textarea {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border);
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--text-tertiary);
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+/* =============================================================================
+   COMPONENT LAYER — Reusable class abstractions
+   These are registered as Tailwind components so they can be overridden
+   by utility classes in the markup (specificity order is correct).
+   ============================================================================= */
+
+@layer components {
+  /* Main page wrapper — constrains content width and centers it */
+  .container-app {
+    @apply w-full mx-auto px-4 md:px-8;
+    max-width: 1200px;
   }
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+  /* Primary button — gold background, dark text */
+  .btn-primary {
+    @apply px-6 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200;
+    background-color: var(--brand);
+    color: #FAFAF7;
   }
-}
-
-body {
-  margin: 0;
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+  .btn-primary:hover {
+    background-color: var(--brand-hover);
+    @apply shadow-md -translate-y-px;
   }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
+
+  /* Outlined button — gold border, no fill */
+  .btn-outline {
+    @apply px-6 py-2.5 rounded-lg font-semibold text-sm border transition-all duration-200;
+    border-color: var(--brand);
+    color: var(--brand);
+    background: transparent;
   }
-}
-p {
-  margin: 0;
-}
+  .btn-outline:hover {
+    background-color: var(--brand-light);
+  }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
+  /* Standard card */
+  .card {
+    @apply rounded-xl shadow-card;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+  /* Form input base */
+  .form-input {
+    @apply w-full px-4 py-3 rounded-lg border text-sm outline-none transition-all duration-150;
+    background-color: var(--bg-tertiary);
+    border-color: var(--border);
+    color: var(--text-primary);
+  }
+  .form-input:focus {
+    border-color: var(--brand);
+    @apply ring-2;
+    --tw-ring-color: var(--brand-light);
+  }
+
+  /* Form label */
+  .form-label {
+    @apply block text-xs font-semibold mb-1.5 tracking-wide uppercase;
+    color: var(--text-tertiary);
+  }
 }
