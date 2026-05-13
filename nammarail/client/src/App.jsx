@@ -13,6 +13,7 @@ import BookingConfirmationPage from './pages/BookingConfirmationPage';
 import MyBookingsPage          from './pages/MyBookingsPage';
 import LoginPage               from './pages/LoginPage';
 import RegisterPage            from './pages/RegisterPage';
+import BookingDetailPage       from './pages/BookingDetailPage';
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 function NotFoundPage() {
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/passengers"                             element={<PassengerFormPage />} />
           <Route path="/booking-confirmation/:bookingId"        element={<BookingConfirmationPage />} />
           <Route path="/my-bookings"                            element={<MyBookingsPage />} />
+          <Route path="/bookings/:bookingId"                    element={<BookingDetailPage />} />
           <Route path="/login"                                  element={<LoginPage />} />
           <Route path="/register"                               element={<RegisterPage />} />
           <Route path="*"                                       element={<NotFoundPage />} />
