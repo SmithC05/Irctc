@@ -25,31 +25,7 @@ import { searchTrains } from '../api/trainApi';
 import TrainCard from '../components/trains/TrainCard';
 import Layout from '../components/layout/Layout';
 
-// ─── Skeleton Card ────────────────────────────────────────────────────────────
-
-function SkeletonCard() {
-  return (
-    <div className="card p-4 md:p-5 animate-pulse">
-      <div className="flex justify-between mb-4">
-        <div>
-          <div className="h-4 w-40 rounded mb-2" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-          <div className="h-3 w-16 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-        </div>
-        <div className="h-5 w-16 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-      </div>
-      <div className="flex items-center gap-3 mb-4">
-        <div className="h-6 w-14 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-        <div className="flex-1 h-2 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-        <div className="h-6 w-14 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-      </div>
-      <div className="flex gap-2">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="h-5 w-16 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }} />
-        ))}
-      </div>
-    </div>
-  );
-}
+import TrainLoader from '../components/ui/TrainLoader';
 
 // ─── Filter Panel content ─────────────────────────────────────────────────────
 
@@ -231,10 +207,16 @@ export default function SearchResultsPage() {
   const [searchParams] = useSearchParams();
   const navigate       = useNavigate();
 
-  const from      = searchParams.get('from')  ?? '';
-  const to        = searchParams.get('to')    ?? '';
-  const date      = searchParams.get('date')  ?? '';
-  const classCode = searchParams.get('class') ?? '';
+  const from      = searchParams.get('from')     ?? '';
+  const to        = searchParams.get('to')       ?? '';
+  const date      = searchParams.get('date')     ?? '';
+  const classCode = searchParams.get('class')    ?? '';
+  // fromName / toName are passed by HomePage so we can display full station names
+  // without a second API call. We fall back to station codes if names are missing
+  // (e.g. when the user navigates directly via a bookmarked URL).
+  const fromName  = searchParams.get('fromName') || from;
+  const toName    = searchParams.get('toName')   || to;
+  const quota     = searchParams.get('quota')    || 'general';
 
   const [results,      setResults]   = useState([]);
   const [isLoading,    setLoading]   = useState(true);
@@ -283,10 +265,14 @@ export default function SearchResultsPage() {
       <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl md:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            {from} → {to}
+            {fromName} → {toName}
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            {dateLabel} {classCode ? `· ${classCode}` : '· All classes'} · {isLoading ? '…' : `${displayed.length} train${displayed.length !== 1 ? 's' : ''}`}
+            {dateLabel}
+            {classCode ? ` · ${classCode}` : ' · All classes'}
+            {quota === 'tatkal' ? ' · ⚡ Tatkal' : ' · General'}
+            {' · '}
+            {isLoading ? '…' : `${displayed.length} train${displayed.length !== 1 ? 's' : ''}`}
           </p>
         </div>
 
@@ -307,8 +293,12 @@ export default function SearchResultsPage() {
         <FilterSidebar filters={filters} onChange={handleFilterChange} />
 
         <div className="flex-1 min-w-0 flex flex-col gap-3">
-          {/* Loading skeletons */}
-          {isLoading && [1, 2, 3].map(i => <SkeletonCard key={i} />)}
+          {/* Loading state */}
+          {isLoading && (
+            <div className="card p-10">
+              <TrainLoader size="large" message="Searching for trains" />
+            </div>
+          )}
 
           {/* Error */}
           {!isLoading && error && (
@@ -330,6 +320,7 @@ export default function SearchResultsPage() {
               train={train}
               searchedClass={classCode}
               searchDate={date}
+              quota={quota}
             />
           ))}
         </div>

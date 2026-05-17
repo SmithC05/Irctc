@@ -26,7 +26,7 @@ import { Navigate, Link }       from 'react-router-dom';
 import { useAuth }              from '../context/AuthContext';
 import { useBookings }          from '../hooks/useBookings';
 import Layout                   from '../components/layout/Layout';
-import LoadingSpinner            from '../components/ui/LoadingSpinner';
+import TrainLoader               from '../components/ui/TrainLoader';
 import BookingCard              from '../components/bookings/BookingCard';
 
 // ─── Tab configuration ────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ export default function MyBookingsPage() {
   if (authLoading) {
     return (
       <Layout>
-        <LoadingSpinner text="Loading your account…" />
+        <TrainLoader message="Loading your account…" size="large" />
       </Layout>
     );
   }
@@ -191,7 +191,7 @@ export default function MyBookingsPage() {
       </div>
 
       {/* ── Loading / Error ──────────────────────────────────────────────── */}
-      {isLoading && <LoadingSpinner text="Loading your bookings…" />}
+      {isLoading && <TrainLoader message="Loading your journeys" size="large" />}
 
       {error && !isLoading && (
         <div className="card p-5 text-center mb-6 text-red-600 dark:text-red-400">

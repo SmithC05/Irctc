@@ -191,51 +191,143 @@ function fetchFareForClass(trainId, fromCode, toCode, classCode) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: buildTrainResult
+// HELPER: calcSegmentDuration
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Combines a raw trains row, inventory data, and fare data into the final
- * response object for one train.  Extracted into its own function to keep
- * searchTrains under 25 lines.
+ * Calculates journey duration in minutes between two stops on the same train.
  *
- * @param {Object} train       - Row from trains table
- * @param {string} journeyDate - YYYY-MM-DD
- * @param {string|null} classCode - Requested class, or null for all
- * @param {string} dayName     - e.g. "Monday"
- * @returns {Object} Fully assembled train result object
+ * WHY WE NEED BOTH departure_time AND day_count:
+ * ────────────────────────────────────────────────
+ * Many Indian trains run overnight — or even over multiple nights.
+ * A time string alone like "06:00" doesn't tell us if it's day 1 or day 2.
+ * day_count solves this: if the from-stop has day_count=1 and the to-stop
+ * has day_count=2, the train arrives the NEXT calendar day.
+ *
+ * Formula:
+ *   totalMinutes = (toDay - fromDay) * 1440   ← each day = 1440 minutes
+ *                + toTimeInMins - fromTimeInMins
+ *
+ * Example: TBM departs 07:30 day_count=1, RJPM arrives 23:15 day_count=1
+ *   = (1-1)*1440 + 1395 - 450 = 945 mins = 15h 45m
+ *
+ * Example: CBE departs 22:00 day_count=1, MAS arrives 05:30 day_count=2
+ *   = (2-1)*1440 + 330 - 1320 = 450 mins = 7h 30m
+ *
+ * @param {string} fromTime  - "HH:MM" departure time from the FROM stop
+ * @param {number} fromDay   - day_count of the FROM stop (1, 2, …)
+ * @param {string} toTime    - "HH:MM" arrival time at the TO stop
+ * @param {number} toDay     - day_count of the TO stop
+ * @returns {number|null} Duration in minutes, or null if times are unavailable
  */
-function buildTrainResult(train, journeyDate, classCode, dayName) {
-    // Determine which classes to show: one specific class, or all available.
-    const faresToShow = fetchFareForClass(
-        train.id, train.from_station_code, train.to_station_code, classCode
+function calcSegmentDuration(fromTime, fromDay, toTime, toDay) {
+    if (!fromTime || !toTime || fromTime === '--' || toTime === '--') return null;
+
+    function toMins(t) {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+    }
+
+    return (toDay - fromDay) * 1440 + toMins(toTime) - toMins(fromTime);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: fetchSegmentFares
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches fares for a searched segment (fromCode → toCode).
+ *
+ * WHY A FALLBACK?
+ * ─────────────────────────────────────────────────────────────────────────────
+ * The fares table stores fare rows for common origin→destination pairs.
+ * For an intermediate segment like TBM→RJPM, an exact fare row may not exist
+ * in the dataset. In that case we fall back to the full-route fare and mark
+ * it approximate — better than showing nothing to the user.
+ *
+ * The fare and duration shown must reflect the SEARCHED SEGMENT (TBM→RJPM),
+ * not the full train journey (MAS→NCJ). This is what real IRCTC does — it
+ * shows you the fare and time for your specific boarding-to-alighting segment.
+ *
+ * @param {number} trainId
+ * @param {string} fromCode  - Searched FROM station
+ * @param {string} toCode    - Searched TO station
+ * @param {string} originCode  - Train's actual origin
+ * @param {string} destCode    - Train's actual destination
+ * @param {string|null} classCode
+ * @returns {{ fares: Object[], fareApproximate: boolean }}
+ */
+function fetchSegmentFares(trainId, fromCode, toCode, originCode, destCode, classCode) {
+    // Try exact segment fare first (the happy path)
+    const exact = fetchFareForClass(trainId, fromCode, toCode, classCode);
+    const exactArr = Array.isArray(exact) ? exact : (exact ? [exact] : []);
+    if (exactArr.length > 0) {
+        return { fares: exactArr, fareApproximate: false };
+    }
+
+    // Fallback: use the full-route fare for this train
+    const fallback = fetchFareForClass(trainId, originCode, destCode, classCode);
+    const fallbackArr = Array.isArray(fallback) ? fallback : (fallback ? [fallback] : []);
+    return { fares: fallbackArr, fareApproximate: fallbackArr.length > 0 };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: buildSegmentResult
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Builds the final result object for one train that serves the searched segment.
+ *
+ * Unlike the old buildTrainResult (which used train-level origin/dest times),
+ * this version uses the STOP-LEVEL times for the searched stations — giving
+ * the passenger accurate departure and arrival for their specific journey.
+ *
+ * @param {Object} row         - Combined row: train columns + s1/s2 stop columns
+ * @param {string} searchFrom  - Searched FROM station code
+ * @param {string} searchTo    - Searched TO station code
+ * @param {string} journeyDate - YYYY-MM-DD
+ * @param {string|null} classCode
+ * @param {string} dayName     - e.g. "Monday"
+ */
+function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, dayName) {
+    // Segment distance = distance of TO stop minus distance of FROM stop.
+    // This gives the actual km the passenger will travel, not the full route.
+    const distanceKm = (row.to_distance || 0) - (row.from_distance || 0);
+
+    // Segment duration from actual stop-level times, accounting for day_count
+    const durationMins = calcSegmentDuration(
+        row.actual_departure, row.from_day_count,
+        row.actual_arrival,   row.to_day_count
     );
 
-    // Normalise to always work with an array of fares.
-    const faresArray = Array.isArray(faresToShow)
-        ? faresToShow
-        : (faresToShow ? [faresToShow] : []);
+    const { fares, fareApproximate } = fetchSegmentFares(
+        row.id, searchFrom, searchTo,
+        row.from_station_code, row.to_station_code,
+        classCode
+    );
 
-    // For each class that has a fare entry, ensure inventory exists and build
-    // the availability shape.  This is the "lazy creation" in action.
+    // Build availability for each fare class (lazy-create inventory)
     const availabilityByClass = {};
-    for (const fare of faresArray) {
-        const inv = createInventoryIfMissing(train.id, journeyDate, fare.class_code);
+    for (const fare of fares) {
+        const inv = createInventoryIfMissing(row.id, journeyDate, fare.class_code);
         availabilityByClass[fare.class_code] = buildAvailabilityShape(inv);
     }
 
     return {
-        trainNumber:   train.id,
-        trainName:     train.name,
-        fromStation:   train.from_station_code,
-        toStation:     train.to_station_code,
-        departureTime: train.departure_time,
-        arrivalTime:   train.arrival_time,
-        durationMins:  train.duration_mins,
-        distanceKm:    train.distance_km,
-        dayOfWeek:     dayName,
-        availability:  availabilityByClass,
-        fares:         faresArray,
+        trainNumber:    row.id,
+        trainName:      row.name,
+        // fromStation / toStation = what the passenger searched, not the train's endpoints
+        fromStation:    searchFrom,
+        toStation:      searchTo,
+        // Segment-specific times from the stations table stops
+        departureTime:  row.actual_departure,
+        arrivalTime:    row.actual_arrival,
+        durationMins,
+        distanceKm,
+        dayOfWeek:      dayName,
+        fareApproximate,
+        availability:   availabilityByClass,
+        fares,
     };
 }
 
@@ -244,69 +336,123 @@ function buildTrainResult(train, journeyDate, classCode, dayName) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Searches for trains between two stations on a given date.
+ * Searches for trains that serve the searched FROM→TO segment.
+ *
+ * WHAT CHANGED (and why the old query was wrong):
+ * ─────────────────────────────────────────────────────────────────────────────
+ * The old query used:
+ *   WHERE trains.from_station_code = ? AND trains.to_station_code = ?
+ * This ONLY matched trains whose ORIGIN and FINAL DESTINATION were the searched
+ * stations — missing any train that merely passes through both as intermediate
+ * stops. For example, MAS→NCJ via TBM, SA, MDU, RJPM was invisible to a user
+ * searching TBM→RJPM.
+ *
+ * THE FIX — double JOIN on the stations table:
+ * We join the stations table TWICE — once for the departure station (s1) and
+ * once for the arrival station (s2). Both JOINs use the same train_id, so only
+ * trains that stop at BOTH stations are returned. The WHERE clause
+ * s1.stop_number < s2.stop_number ensures the passenger is travelling in the
+ * correct direction — s1 (boarding) must physically come before s2 (alighting)
+ * in the train's stop sequence. Without this, a user searching MAS→TBM could
+ * get results for a train running TBM→MAS (wrong direction).
+ *
+ * DAY-OF-WEEK CHECK:
+ * If user searches date=2026-06-15 (a Monday), getDayColumn returns 'runs_mon'.
+ * We then check WHERE t.runs_mon = 1 — this filters out trains that don't run
+ * on Mondays. getDayColumn always receives the user's SEARCHED date, not today.
  *
  * Required query params: from, to, date
  * Optional query param:  class (e.g. SL, 3A, 2A)
- *
- * Steps:
- *   1. Validate inputs
- *   2. Determine the day-of-week column for the requested date
- *   3. Query trains table with the appropriate runs_xxx column filter
- *   4. For each train, assemble availability + fare data
- *   5. Return the result array
  */
 function searchTrains(req, res) {
     const { from, to, date, class: classCode } = req.query;
 
-    // Step 1: Validate required station params.
+    // ── Step 1: Validate required params ──────────────────────────────────
     if (!from || !to) {
         return res.status(400).json({ error: 'from and to station codes are required' });
     }
+    if (from.toUpperCase() === to.toUpperCase()) {
+        return res.status(400).json({ error: 'from and to stations cannot be the same' });
+    }
 
-    // Step 2: Validate the date using the shared dateUtils module.
-    // This enforces the same rules as the booking engine:
-    //   format check → past check → 60-day window check.
+    // ── Step 2: Validate the journey date ────────────────────────────────
+    // validateJourneyDate enforces: format, not in past, within 60-day window.
     const dateValidation = validateJourneyDate(date);
     if (!dateValidation.valid) {
         return res.status(400).json({ error: dateValidation.error });
     }
 
-    // Step 3: Determine day of week from the validated date.
+    // ── Step 3: Determine day of week from the searched date ──────────────
+    // getDayColumn(date) — note: uses the SEARCHED date, not today.
+    // Example: date="2026-06-15" (Monday) → dayColumn="runs_mon"
     const dayColumn = getDayColumn(date);   // e.g. 'runs_mon'
     const dayName   = getDayName(date);     // e.g. 'Monday'
 
-    // Step 3: Fetch matching trains.
-    // The dynamic column name (dayColumn) is safe here because it comes from
-    // our own constant array — not from user input — so it cannot cause injection.
-    const trains = db.prepare(`
-        SELECT *
-        FROM   trains
-        WHERE  from_station_code = ?
-          AND  to_station_code   = ?
-          AND  ${dayColumn}      = 1
-        ORDER BY departure_time
-    `).all(from.toUpperCase(), to.toUpperCase());
+    const fromCode = from.toUpperCase();
+    const toCode   = to.toUpperCase();
 
-    if (trains.length === 0) {
+    // ── Step 4: Double-JOIN query ─────────────────────────────────────────
+    //
+    // We join the stations table TWICE:
+    //   s1 = the row for the FROM station on this train
+    //   s2 = the row for the TO   station on this train
+    //
+    // Both JOINs include train_id = t.id, so a row only appears when
+    // a single train has BOTH stations in its stop list.
+    //
+    // WHERE s1.stop_number < s2.stop_number
+    //   → ensures direction is correct (FROM comes before TO in the schedule)
+    //   → a train running MAS→TBM would have TBM at a lower stop_number than
+    //     MAS, so searching MAS→TBM would yield 0 results for that train.
+    //
+    // The dynamic dayColumn is safe: it comes from getDayColumn() which maps
+    // to a fixed constant array — not user input — so SQL injection is impossible.
+    //
+    // We select s1's departure_time and s2's arrival_time so downstream code
+    // shows the passenger THEIR departure / arrival, not the train's origin times.
+    // We also select day_count for both stops to calculate multi-day durations.
+    const rows = db.prepare(`
+        SELECT DISTINCT
+            t.*,
+            s1.stop_number          AS from_stop_number,
+            s1.departure_time       AS actual_departure,
+            s1.distance_from_origin AS from_distance,
+            s1.day_count            AS from_day_count,
+            s2.stop_number          AS to_stop_number,
+            s2.arrival_time         AS actual_arrival,
+            s2.distance_from_origin AS to_distance,
+            s2.day_count            AS to_day_count
+        FROM   trains t
+        JOIN   stations s1
+               ON  s1.train_id     = t.id
+               AND s1.station_code = ?          -- s1: the FROM stop
+        JOIN   stations s2
+               ON  s2.train_id     = t.id
+               AND s2.station_code = ?          -- s2: the TO stop
+        WHERE  s1.stop_number < s2.stop_number  -- FROM must come before TO
+          AND  t.${dayColumn}    = 1            -- runs on the searched day
+        ORDER BY s1.departure_time
+    `).all(fromCode, toCode);
+
+    if (rows.length === 0) {
         return res.status(200).json({
-            message: `No trains found from ${from} to ${to} on ${dayName}`,
+            message: `No trains found from ${fromCode} to ${toCode} on ${dayName}`,
             trains:  [],
         });
     }
 
-    // Step 4: Assemble the full result for each train.
-    const results = trains.map(train =>
-        buildTrainResult(train, date, classCode || null, dayName)
+    // ── Step 5: Build the full result for each matching train ─────────────
+    const results = rows.map(row =>
+        buildSegmentResult(row, fromCode, toCode, date, classCode || null, dayName)
     );
 
     return res.status(200).json({
-        from:    from.toUpperCase(),
-        to:      to.toUpperCase(),
+        from:      fromCode,
+        to:        toCode,
         date,
         dayOfWeek: dayName,
-        count:   results.length,
-        trains:  results,
+        count:     results.length,
+        trains:    results,
     });
 }
 
@@ -403,4 +549,112 @@ function getTrainDetails(req, res) {
     });
 }
 
-module.exports = { searchTrains, getTrainDetails };
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: toTitleCase
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// WHY DO WE TITLE-CASE STATION NAMES?
+// ─────────────────────────────────────────────────────────────────────────────
+// The raw data in our SQLite database was imported from the legacy Indian
+// Railways dataset which stores ALL station names in UPPERCASE (e.g.
+// "MGR CHENNAI CTL", "COIMBATORE JN"). This is a formatting artifact of
+// older mainframe systems. All-caps text is harder to read and looks
+// unprofessional in a modern UI. We convert to Title Case before sending
+// to the client so the dropdown shows "Mgr Chennai Ctl" instead.
+// The backend is responsible for this transform — if the UI did it,
+// every frontend client would have to repeat the same logic.
+
+function toTitleCase(str) {
+    if (!str) return str;
+    return str
+        .toLowerCase()
+        .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCTION: searchStations — GET /api/stations/search?q=chen
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Searches for stations whose code OR name contains the query string.
+ *
+ * Query params:
+ *   q  - the search text typed by the user (minimum 2 characters)
+ *
+ * Returns an array of { code, name } objects (max 8 results).
+ */
+function searchStations(req, res) {
+    const { q } = req.query;
+
+    // ── 2-character minimum guard ──────────────────────────────────────────
+    // We require at least 2 characters before querying the database.
+    // Without this guard, a user typing a single letter like "C" would match
+    // hundreds of stations (Chennai, Coimbatore, Cochin, Calicut…) causing
+    // an expensive full-table scan and returning overwhelming results.
+    // This is called a "debounce guard on the backend" — the frontend also
+    // debounces API calls (300ms), but the backend enforces the minimum
+    // independently so it can never be bypassed by a direct API call.
+    if (!q || q.trim().length < 2) {
+        return res.status(400).json({
+            error: 'Query must be at least 2 characters.',
+        });
+    }
+
+    const query = `%${q.trim()}%`;
+
+    // ── DISTINCT explained ────────────────────────────────────────────────
+    // The `stations` table stores one row PER STOP PER TRAIN.
+    // "Chennai Central" (code: MAS) appears once for every train that halts
+    // there — potentially hundreds of rows for the same physical station.
+    // Without DISTINCT, searching "chennai" would return "MAS" 200+ times.
+    // SELECT DISTINCT collapses all duplicates so each station appears once.
+    // We only SELECT the two columns we need (code and name) — not SELECT *
+    // — because DISTINCT works on the entire selected row; fewer columns
+    // means fewer comparisons and a faster query.
+    //
+    // SQLITE LIKE IS CASE INSENSITIVE for ASCII characters by default.
+    // So LIKE '%chen%' will match "Chennai", "CHENNAI", and "chen" without
+    // needing a LOWER() call on both sides. This only applies to ASCII
+    // (English) letters — multi-byte Unicode would need explicit handling,
+    // but Indian station names in our dataset are all transliterated ASCII.
+    const rows = db.prepare(`
+        SELECT DISTINCT station_code, station_name
+        FROM   stations
+        WHERE  station_code LIKE ?
+           OR  station_name LIKE ?
+        LIMIT 8
+    `).all(query, query);
+
+    // ── Limit explained ───────────────────────────────────────────────────
+    // We cap results at 8 for two reasons:
+    //   1. UX research shows that more than 7–8 options overwhelm users;
+    //      they stop reading and either pick randomly or abandon the search.
+    //   2. On mobile screens, 8 items already fill the visible viewport —
+    //      more would require scrolling inside the dropdown which is clunky.
+    // The LIMIT clause is in SQL (not JS .slice()) so the database stops
+    // scanning once it finds 8 matches — faster than fetching all and trimming.
+
+    const stations = rows.map(r => ({
+        code: r.station_code,
+        name: toTitleCase(r.station_name),
+    }));
+
+    return res.status(200).json(stations);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCTION: getStats — GET /api/stats
+// ─────────────────────────────────────────────────────────────────────────────
+function getStats(req, res) {
+    try {
+        const trainCount = db.prepare('SELECT COUNT(*) as cnt FROM trains').get().cnt;
+        const stationCount = db.prepare('SELECT COUNT(*) as cnt FROM stations').get().cnt;
+        const fareCount = db.prepare('SELECT COUNT(*) as cnt FROM fares').get().cnt;
+        
+        return res.status(200).json({ trainCount, stationCount, fareCount });
+    } catch (error) {
+        return res.status(500).json({ error: 'Failed to fetch stats' });
+    }
+}
+
+module.exports = { searchTrains, getTrainDetails, searchStations, getStats };

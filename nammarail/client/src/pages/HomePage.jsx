@@ -1,224 +1,125 @@
-// =============================================================================
-// NammaRail — Home Page (Train Search)
-// =============================================================================
-//
-// MOBILE-FIRST CSS APPROACH:
-// ─────────────────────────────────────────────────────────────────────────────
-// Write base styles for the smallest screen (mobile), then use responsive
-// prefixes to override for larger screens:
-//   md: = 768px and above (tablets)
-//   lg: = 1024px and above (desktop)
-//
-// Example: className="px-4 md:px-8" means 16px padding on mobile, 32px on tablet+.
-// This is better than "desktop-first + overrides" because most web traffic
-// is on mobile — start with the constrained case, expand for more space.
-//
-// DATE INPUT MIN/MAX:
-// ─────────────────────────────────────────────────────────────────────────────
-// date inputs accept "min" and "max" as YYYY-MM-DD strings.
-// We calculate:
-//   min = today (can't book in the past)
-//   max = today + 60 days (IRCTC's Advance Reservation Period)
-// We use toISOString().slice(0,10) to get "2026-06-15" from a Date object.
-// =============================================================================
+import React, { useState } from 'react';
+import HomeNav from '../components/home/HomeNav';
+import HeroSection from '../components/home/HeroSection';
+import SearchForm from '../components/home/SearchForm';
+import StatsBar from '../components/home/StatsBar';
+import QuickServices from '../components/home/QuickServices';
 
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import Layout from '../components/layout/Layout';
+// ─── Animations & Styles ────────────────────────────────────────────────────
+// EXPLAIN ANIMATION KEYFRAMES:
+// @keyframes fieldFadeUp: Starts element 8px lower and transparent, then animates it up to its natural position while fading in to full opacity.
+// @keyframes goldPulse: Expands a gold box-shadow outwards to 8px while fading its opacity to 0, creating a glowing pulse effect.
+const styles = `
+  @keyframes fieldFadeUp {
+    from { opacity: 0; transform: translateY(8px) }
+    to   { opacity: 1; transform: translateY(0) }
+  }
+  @keyframes goldPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(240,192,64,0.4) }
+    50%       { box-shadow: 0 0 0 8px rgba(240,192,64,0) }
+  }
+  
+  /* STAGGER ANIMATION TECHNIQUE: 
+     By applying increasing animation-delay (0.1s, 0.2s, 0.3s) to each field, 
+     they fade into view sequentially, drawing the user's eye smoothly through the form. */
+  .fade-up-1 { animation: fieldFadeUp 0.5s ease forwards; animation-delay: 0.1s; opacity: 0; }
+  .fade-up-2 { animation: fieldFadeUp 0.5s ease forwards; animation-delay: 0.2s; opacity: 0; }
+  .fade-up-3 { animation: fieldFadeUp 0.5s ease forwards; animation-delay: 0.3s; opacity: 0; }
+  .fade-up-4 { animation: fieldFadeUp 0.5s ease forwards; animation-delay: 0.4s; opacity: 0; }
+  .fade-up-5 { animation: fieldFadeUp 0.5s ease forwards; animation-delay: 0.5s; opacity: 0; }
+  
+  .btn-search { animation: goldPulse 2s infinite; }
+  .btn-search:hover { animation: none; background-color: #0f2744; }
+  .panel-enter { animation: fieldFadeUp 0.5s ease forwards; animation-delay: 0.2s; opacity: 0; }
+  .title-enter { animation: fieldFadeUp 0.6s ease forwards; opacity: 0; }
+  .subtitle-enter { animation: fieldFadeUp 0.6s ease forwards; animation-delay: 0.1s; opacity: 0; }
+  .card-hover:hover { border-color: #1a3a5c; background-color: rgba(26,58,92,0.03); }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+`;
 
-// ─── Date helpers ─────────────────────────────────────────────────────────────
-
-function getTodayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getMaxDateStr() {
-  const d = new Date();
-  d.setDate(d.getDate() + 60);
-  return d.toISOString().slice(0, 10);
-}
-
-// ─── Swap Icon ────────────────────────────────────────────────────────────────
-function SwapIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-    </svg>
-  );
-}
-
-// ─── Search Card ──────────────────────────────────────────────────────────────
-function SearchForm({ form, onChange, onSwap, onSubmit, error }) {
-  return (
-    <form
-      onSubmit={onSubmit}
-      className="card p-6 md:p-8 flex flex-col gap-5"
-    >
-      <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
-        Find Your Train
-      </h2>
-
-      {/* From / Swap / To */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
-        <div className="flex-1">
-          <label className="form-label">From</label>
-          <input
-            id="from-station"
-            name="from"
-            value={form.from}
-            onChange={onChange}
-            placeholder="e.g. MAS"
-            className="form-input uppercase"
-            maxLength={6}
-          />
-        </div>
-
-        {/* Swap button — sits between the two station inputs */}
-        <button
-          type="button"
-          onClick={onSwap}
-          title="Swap stations"
-          className="
-            self-end sm:self-auto mb-0 sm:mb-0
-            flex items-center justify-center
-            w-10 h-10 rounded-lg border transition-all duration-200
-            hover:bg-brand-light flex-shrink-0
-          "
-          style={{ borderColor: 'var(--border)', color: 'var(--brand)' }}
-        >
-          <SwapIcon />
-        </button>
-
-        <div className="flex-1">
-          <label className="form-label">To</label>
-          <input
-            id="to-station"
-            name="to"
-            value={form.to}
-            onChange={onChange}
-            placeholder="e.g. CBE"
-            className="form-input uppercase"
-            maxLength={6}
-          />
-        </div>
-      </div>
-
-      {/* Date + Class */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="form-label">Journey Date</label>
-          <input
-            id="journey-date"
-            type="date"
-            name="date"
-            value={form.date}
-            onChange={onChange}
-            min={getTodayStr()}
-            max={getMaxDateStr()}
-            className="form-input"
-          />
-        </div>
-        <div>
-          <label className="form-label">Class</label>
-          <select
-            id="travel-class"
-            name="classCode"
-            value={form.classCode}
-            onChange={onChange}
-            className="form-input"
-          >
-            <option value="">All Classes</option>
-            <option value="SL">Sleeper (SL)</option>
-            <option value="3A">Third AC (3A)</option>
-            <option value="2A">Second AC (2A)</option>
-            <option value="1A">First AC (1A)</option>
-            <option value="CC">Chair Car (CC)</option>
-            <option value="2S">Second Sitting (2S)</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Validation error */}
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      )}
-
-      <button type="submit" id="search-trains-btn" className="btn-primary w-full py-3 text-base">
-        🔍 Search Trains
-      </button>
-    </form>
-  );
-}
-
-// ─── Hero Section ─────────────────────────────────────────────────────────────
-function HeroBadge() {
-  return (
-    <div className="text-center mb-8">
-      <div className="inline-block px-3 py-1 rounded-full text-xs font-semibold mb-4"
-        style={{ backgroundColor: 'var(--brand-light)', color: 'var(--brand)' }}>
-        Book • Travel • Explore
-      </div>
-      <h1 className="text-3xl md:text-4xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>
-        NammaRail Booking
-      </h1>
-      <p className="text-base md:text-lg" style={{ color: 'var(--text-secondary)' }}>
-        Search trains across India. Book in seconds.
-      </p>
-    </div>
-  );
-}
-
-// ─── Main Page Component ──────────────────────────────────────────────────────
 export default function HomePage() {
-  const navigate = useNavigate();
-  const [error, setError] = useState('');
-  const [form, setForm] = useState({
-    from:      '',
-    to:        '',
-    date:      getTodayStr(),
-    classCode: '',
-  });
-
-  function handleChange(e) {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    setError('');
-  }
-
-  function handleSwap() {
-    setForm(prev => ({ ...prev, from: prev.to, to: prev.from }));
-  }
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    if (!form.from.trim()) return setError('Please enter a departure station');
-    if (!form.to.trim())   return setError('Please enter a destination station');
-    if (!form.date)        return setError('Please select a journey date');
-
-    // Navigate to search results with query params.
-    // React Router's useNavigate handles this cleanly — no manual URL building.
-    const params = new URLSearchParams({
-      from: form.from.trim().toUpperCase(),
-      to:   form.to.trim().toUpperCase(),
-      date: form.date,
-      ...(form.classCode && { class: form.classCode }),
-    });
-    navigate(`/search-results?${params.toString()}`);
-  }
+  const [showTooltip, setShowTooltip] = useState(null);
 
   return (
-    <Layout>
-      <div className="min-h-[70vh] flex flex-col items-center justify-center py-8">
-        <div className="w-full max-w-2xl">
-          <HeroBadge />
-          <SearchForm
-            form={form}
-            onChange={handleChange}
-            onSwap={handleSwap}
-            onSubmit={handleSubmit}
-            error={error}
-          />
+    <div className="min-h-screen flex flex-col">
+      <style dangerouslySetInnerHTML={{ __html: styles }} />
+      
+      <HomeNav />
+
+      {/* SECTION 1: TOP INFO BAR */}
+      <div className="bg-[#0f2744] text-white/70 text-[11px] py-1 px-4 flex justify-between items-center z-10 border-t border-white/10">
+        <div className="hidden md:block">Ministry of Railways, Government of India</div>
+        <div className="flex gap-3 md:ml-auto w-full md:w-auto justify-end">
+          <a href="#" className="hover:text-white transition-colors">हिन्दी</a>
+          <span>·</span>
+          <a href="#" className="hover:text-white transition-colors">தமிழ்</a>
+          <span>·</span>
+          <a href="#" className="hover:text-white transition-colors">Help</a>
         </div>
       </div>
-    </Layout>
+
+      <HeroSection />
+
+      {/* SECTION 3: SEARCH PANEL */}
+      <div className="max-w-5xl mx-auto w-full px-4 sm:px-5 -mt-2 z-10 relative">
+        <div className="bg-secondary border-t-[3px] border-[#f0c040] rounded-b-md shadow-md panel-enter">
+          
+          {/* Tabs are UI placeholders for future features. Only Book Ticket is implemented in this version. */}
+          <div className="flex border-b border-border text-[13px] font-medium overflow-x-auto hide-scrollbar">
+            <button className="px-5 py-3 border-b-2 border-[#f0c040] text-[#1a3a5c] dark:text-[#f0c040] whitespace-nowrap">
+              Book Ticket
+            </button>
+            <div className="relative">
+              <button 
+                onMouseEnter={() => setShowTooltip('pnr')}
+                onMouseLeave={() => setShowTooltip(null)}
+                className="px-5 py-3 border-b-2 border-transparent text-gray-400 whitespace-nowrap cursor-not-allowed">
+                PNR Status
+              </button>
+              {showTooltip === 'pnr' && <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded z-20">Coming soon</div>}
+            </div>
+            <div className="relative">
+              <button 
+                onMouseEnter={() => setShowTooltip('schedule')}
+                onMouseLeave={() => setShowTooltip(null)}
+                className="px-5 py-3 border-b-2 border-transparent text-gray-400 whitespace-nowrap cursor-not-allowed">
+                Train Schedule
+              </button>
+              {showTooltip === 'schedule' && <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded z-20">Coming soon</div>}
+            </div>
+          </div>
+
+          <SearchForm />
+        </div>
+      </div>
+
+      <StatsBar />
+
+      {/* SECTION 5: NOTICE BAR */}
+      <div className="max-w-5xl mx-auto w-full px-5 mt-6">
+        <div className="bg-[#FFF8E6] border border-[#f0c040] rounded px-3 py-2 flex items-start gap-3">
+          <span className="bg-[#1a3a5c] text-white text-[10px] px-2 py-0.5 rounded font-medium mt-0.5 shrink-0">NOTICE</span>
+          <p className="text-[11px] text-[#996500] leading-snug">
+            Tatkal booking opens 1 day before journey date. No refund applicable on cancellation of Tatkal tickets.
+          </p>
+        </div>
+      </div>
+
+      <QuickServices />
+
+      <div className="flex-grow"></div>
+
+      {/* SECTION 7: FOOTER STRIP */}
+      <div className="bg-[#0f2744] text-white/50 text-[10px] py-3 px-5 flex flex-col md:flex-row justify-between items-center gap-2 mt-auto">
+        <div>© 2026 NammaRail · Ministry of Railways, Government of India</div>
+        <div className="flex gap-3">
+          <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
+          <span>·</span>
+          <a href="#" className="hover:text-white transition-colors">Terms of Use</a>
+          <span>·</span>
+          <a href="#" className="hover:text-white transition-colors">Accessibility</a>
+        </div>
+      </div>
+    </div>
   );
 }

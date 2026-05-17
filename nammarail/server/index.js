@@ -17,6 +17,7 @@ const cors       = require("cors");
 const authRoutes    = require("./routes/authRoutes");
 const trainRoutes   = require("./routes/trainRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
+const stationRoutes = require("./routes/stationRoutes");
 
 // ─────────────────────────────────────────────
 // Create the Express app instance
@@ -92,6 +93,13 @@ app.use('/api/trains',   trainRoutes);
 //   GET  /api/bookings/:id
 // ─────────────────────────────────────────────
 app.use('/api/bookings', bookingRoutes);
+
+// ─────────────────────────────────────────────
+// Mount the station search router.
+// All routes inside stationRoutes.js are prefixed with /api/stations:
+//   GET /api/stations/search?q=chen
+// ─────────────────────────────────────────────
+app.use('/api/stations', stationRoutes);
 
 // ─────────────────────────────────────────────
 // 404 handler — catches any route that doesn't match above

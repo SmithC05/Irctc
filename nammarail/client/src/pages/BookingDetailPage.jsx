@@ -25,7 +25,7 @@ import { useParams, Link, Navigate } from 'react-router-dom';
 import { getBookingById }           from '../api/bookingApi';
 import { useAuth }                  from '../context/AuthContext';
 import Layout                       from '../components/layout/Layout';
-import LoadingSpinner               from '../components/ui/LoadingSpinner';
+import TrainLoader               from '../components/ui/TrainLoader';
 import StatusBadge                  from '../components/ui/StatusBadge';
 import CancelModal                  from '../components/bookings/CancelModal';
 import { useBookings }              from '../hooks/useBookings';
@@ -175,7 +175,7 @@ export default function BookingDetailPage() {
 
   // ── Auth guard ────────────────────────────────────────────────────────────
   if (authLoading) {
-    return <Layout><LoadingSpinner text="Loading…" /></Layout>;
+    return <Layout><TrainLoader message="Loading…" size="large" /></Layout>;
   }
   if (!isLoggedIn) return <Navigate to="/login" replace />;
 
@@ -231,7 +231,7 @@ export default function BookingDetailPage() {
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (isLoading || !booking) {
-    return <Layout><LoadingSpinner text="Loading booking…" /></Layout>;
+    return <Layout><TrainLoader message="Loading booking…" size="large" /></Layout>;
   }
 
   // ── Derived values ────────────────────────────────────────────────────────

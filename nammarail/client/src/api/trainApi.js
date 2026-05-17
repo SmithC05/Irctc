@@ -31,3 +31,22 @@ export const getTrainDetails = (trainNumber, from, to, date) =>
   api.get(`/trains/${trainNumber}`, {
     params: { from, to, date },
   });
+
+/**
+ * Search for stations matching a partial code or name.
+ * @param {string} query - At least 2 characters (e.g. "chen", "MAS")
+ *
+ * WHY encodeURIComponent?
+ * ─────────────────────────────────────────────────────────────────────────────
+ * URLs cannot contain raw spaces or special characters. If the user types
+ * "Chennai Central", the space must be encoded as "%20" before it is put
+ * in the URL — otherwise the browser splits the URL at the space and the
+ * server receives a broken, incomplete query string.
+ * encodeURIComponent("Chennai Central") → "Chennai%20Central"
+ * encodeURIComponent("MAS&CBE")         → "MAS%26CBE"  (& encoded too)
+ * This prevents both broken URLs and accidental query-param injection.
+ */
+export const searchStations = (query) =>
+  api.get(`/stations/search?q=${encodeURIComponent(query)}`);
+
+export const getStats = () => api.get('/trains/stats');
