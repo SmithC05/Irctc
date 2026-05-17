@@ -25,8 +25,11 @@ import axios from 'axios';
 
 // Create a custom Axios instance with the backend's base URL baked in.
 // All calls using this instance automatically prefix /api to the path.
+const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const apiUrl = rawApiUrl.replace(/\/$/, ''); // Remove trailing slash if present
+
 const api = axios.create({
-  baseURL: `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`,
+  baseURL: `${apiUrl}/api`,
   headers: {
     'Content-Type': 'application/json',
   },

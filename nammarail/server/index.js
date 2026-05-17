@@ -32,16 +32,37 @@ const app = express();
 // ─────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
-// ─────────────────────────────────────────────
 // Configure CORS (Cross-Origin Resource Sharing)
-// This tells the browser: "It's okay for http://localhost:5173 (our React app)
-// to make requests to this server."
-// Without this, browsers block requests between different ports/domains.
-// ─────────────────────────────────────────────
+// This tells the browser which origins are allowed to request resources.
+// We support both with and without trailing slashes for robustness.
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
+if (process.env.CLIENT_URL) {
+  const cleanClientUrl = process.env.CLIENT_URL.replace(/\/$/, "");
+  allowedOrigins.push(cleanClientUrl);
+}
+
 const corsOptions = {
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+    
+    const cleanOrigin = origin.replace(/\/$/, "");
+    const isAllowed = allowedOrigins.some(allowed => allowed.replace(/\/$/, "") === cleanOrigin);
+    
+    if (isAllowed) {
+      // Echo the exact origin to satisfy the browser's CORS check
+      callback(null, origin);
+    } else {
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+  },
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
 };
 
 app.use(cors(corsOptions));
