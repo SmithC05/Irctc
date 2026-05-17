@@ -26,7 +26,7 @@ import axios from 'axios';
 // Create a custom Axios instance with the backend's base URL baked in.
 // All calls using this instance automatically prefix /api to the path.
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
