@@ -1,111 +1,519 @@
+/* =============================================================================
+   NammaRail — Global Styles
+   =============================================================================
+   Import order:
+     1. @tailwind base       → Preflight resets
+     2. @tailwind components → Reusable class layer
+     3. @tailwind utilities  → Utility classes
+   ============================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   CSS CUSTOM PROPERTIES — Design Tokens
+   ============================================================================= */
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* ── Light mode: warm ivory palette ───────────────────────────────── */
+  --bg-primary:      #F8F7F2;
+  --bg-secondary:    #FFFFFF;
+  --bg-tertiary:     #F0EDE4;
+  --bg-elevated:     #FFFFFF;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --brand:           #B07D10;
+  --brand-hover:     #956A0A;
+  --brand-light:     #FBF3DC;
+  --brand-glow:      rgba(176, 125, 16, 0.14);
+  --brand-gradient:  linear-gradient(135deg, #C49020 0%, #A06B08 100%);
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --text-primary:    #1A1916;
+  --text-secondary:  #5A5750;
+  --text-tertiary:   #97948A;
+  --text-inverted:   #FEFCF5;
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
+  --border:          #E8E4D9;
+  --border-subtle:   #F0EDE6;
+  --border-focus:    #B07D10;
+
+  /* Semantic: error */
+  --error:           #C0392B;
+  --error-bg:        rgba(192, 57, 43, 0.06);
+  --error-border:    rgba(192, 57, 43, 0.22);
+  --error-ring:      rgba(192, 57, 43, 0.12);
+
+  /* Semantic: warning (Tatkal) */
+  --warning:         #B07D10;
+  --warning-bg:      rgba(176, 125, 16, 0.06);
+  --warning-border:  rgba(176, 125, 16, 0.22);
+
+  --shadow-sm:         0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-card:       0 1px 4px rgba(0,0,0,0.04), 0 6px 20px rgba(0,0,0,0.06);
+  --shadow-card-hover: 0 4px 12px rgba(0,0,0,0.08), 0 16px 40px rgba(0,0,0,0.10);
+  --shadow-navbar:     0 1px 0 rgba(0,0,0,0.06);
+  --shadow-input:      0 1px 2px rgba(0,0,0,0.04);
+  --shadow-focus:      0 0 0 3px rgba(176, 125, 16, 0.15);
+  --shadow-btn:        0 1px 3px rgba(0,0,0,0.14), 0 2px 8px rgba(176,125,16,0.20);
+  --shadow-btn-hover:  0 3px 8px rgba(0,0,0,0.18), 0 4px 16px rgba(176,125,16,0.28);
+}
+
+.dark {
+  /* ── Dark mode: warm charcoal — NOT pure black ─────────────────────
+     Surface scale (darkest → lightest):
+       bg-primary   #12110C  — page base, very dark warm brown-black
+       bg-secondary #1E1C15  — card surface, one step lighter
+       bg-tertiary  #272519  — input surface, toggle track
+       bg-elevated  #2E2C1F  — dropdowns, floating elements
+     This 4-stop scale creates real depth without flat lifeless blacks.
+  ─────────────────────────────────────────────────────────────────── */
+  --bg-primary:      #12110C;
+  --bg-secondary:    #1E1C15;
+  --bg-tertiary:     #272519;
+  --bg-elevated:     #2E2C1F;
+
+  --brand:           #D4AA28;
+  --brand-hover:     #E8C040;
+  --brand-light:     #261E00;
+  --brand-glow:      rgba(212, 170, 40, 0.18);
+  --brand-gradient:  linear-gradient(135deg, #E0B830 0%, #BF9010 100%);
+
+  --text-primary:    #EDE9DC;
+  --text-secondary:  #A8A295;
+  --text-tertiary:   #706A5C;
+  --text-inverted:   #FEFCF5;
+
+  --border:          #302E22;
+  --border-subtle:   #252318;
+  --border-focus:    #D4AA28;
+
+  /* Semantic: error — slightly desaturated in dark, less eye-jarring */
+  --error:           #E05A4A;
+  --error-bg:        rgba(224, 90, 74, 0.08);
+  --error-border:    rgba(224, 90, 74, 0.25);
+  --error-ring:      rgba(224, 90, 74, 0.14);
+
+  /* Semantic: warning */
+  --warning:         #D4AA28;
+  --warning-bg:      rgba(212, 170, 40, 0.08);
+  --warning-border:  rgba(212, 170, 40, 0.24);
+
+  --shadow-sm:         0 1px 3px rgba(0,0,0,0.4);
+  --shadow-card:       0 2px 8px rgba(0,0,0,0.30), 0 8px 24px rgba(0,0,0,0.22);
+  --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.45), 0 16px 48px rgba(0,0,0,0.32);
+  --shadow-navbar:     0 1px 0 rgba(255,255,255,0.04);
+  --shadow-input:      0 1px 3px rgba(0,0,0,0.25);
+  --shadow-focus:      0 0 0 3px rgba(212, 170, 40, 0.20);
+  --shadow-btn:        0 1px 3px rgba(0,0,0,0.45), 0 2px 10px rgba(212,170,40,0.22);
+  --shadow-btn-hover:  0 3px 10px rgba(0,0,0,0.55), 0 4px 18px rgba(212,170,40,0.32);
+}
+
+/* =============================================================================
+   SMOOTH THEME TRANSITION
+   Applied to elements most visible during theme switches.
+   IMPORTANT: We intentionally omit `transition` on inputs to avoid the
+   jarring delay when typing. Transitions only apply to the cosmetic properties
+   background-color, color, border-color, box-shadow.
+   ============================================================================= */
+html {
+  /* Switching themes triggers CSS variable changes, which don't auto-animate.
+     We add transitions to the most-visible structural elements instead. */
+}
+
+body,
+.card,
+nav,
+footer,
+main {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease;
+}
+
+/* =============================================================================
+   BASE ELEMENT STYLES
+   ============================================================================= */
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    overflow-y: scroll;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.012em;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg-primary); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--brand); }
+
+  /* Input base — inherits theme tokens */
+  input, select, textarea {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border);
+  }
+  input::placeholder, textarea::placeholder {
+    color: var(--text-tertiary);
+    font-weight: 400;
+  }
+
+  /* Date picker icon adapts per theme */
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0.4;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    /* In dark mode, the icon renders light automatically via color-scheme */
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.75; }
+  input[type="date"].form-input { color-scheme: light dark; }
+
+  /* Custom select chevron — warm tertiary tone */
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2397948A' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 2.5rem !important;
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+/* =============================================================================
+   COMPONENT LAYER
+   ============================================================================= */
+
+@layer components {
+
+  /* ── Layout container ────────────────────────────────────────────── */
+  .container-app {
+    @apply w-full mx-auto px-5 md:px-8;
+    max-width: 1200px;
   }
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+  /* ── Primary CTA button ──────────────────────────────────────────── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+           px-6 py-2.5 rounded-xl font-semibold text-sm
+           select-none cursor-pointer relative overflow-hidden;
+    background: var(--brand-gradient);
+    color: var(--text-inverted);
+    box-shadow: var(--shadow-btn);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  }
+  .btn-primary:hover {
+    box-shadow: var(--shadow-btn-hover);
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0) scale(0.99);
+    box-shadow: var(--shadow-btn);
+    filter: brightness(0.97);
+  }
+
+  /* ── Outlined button ─────────────────────────────────────────────── */
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2
+           px-5 py-2.5 rounded-xl font-semibold text-sm border
+           select-none cursor-pointer;
+    border-color: var(--border);
+    color: var(--text-secondary);
+    background: transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-outline:hover {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-focus);
+    color: var(--brand);
+  }
+
+  /* ── Card ────────────────────────────────────────────────────────── */
+  .card {
+    @apply rounded-2xl;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.25s ease;
+  }
+  .card:hover {
+    box-shadow: var(--shadow-card-hover);
+    border-color: color-mix(in srgb, var(--border) 60%, var(--brand) 40%);
+  }
+
+  /* ── Form input ──────────────────────────────────────────────────── */
+  .form-input {
+    @apply w-full px-4 py-3 rounded-xl border text-sm font-medium outline-none;
+    background-color: var(--bg-tertiary);
+    border-color: var(--border);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-input);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  }
+  .form-input:hover:not(:focus) {
+    border-color: var(--text-tertiary);
+    background-color: var(--bg-elevated);
+  }
+  .form-input:focus {
+    border-color: var(--border-focus);
+    background-color: var(--bg-secondary);
+    box-shadow: var(--shadow-focus), var(--shadow-input);
+  }
+
+  /* ── Form label ──────────────────────────────────────────────────── */
+  .form-label {
+    @apply block text-[10px] font-bold mb-2 tracking-[0.08em] uppercase;
+    color: var(--text-tertiary);
+  }
+
+  /* ── Fading divider ──────────────────────────────────────────────── */
+  .divider {
+    @apply w-full h-px;
+    background: linear-gradient(to right, transparent, var(--border) 20%, var(--border) 80%, transparent);
+  }
+
+  /* ── Badge ───────────────────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+
+  /* ── Error state helpers ─────────────────────────────────────────────── */
+  .input-error {
+    border-color: var(--error) !important;
+    box-shadow: 0 0 0 3px var(--error-ring) !important;
+  }
+
+  /* ── Section divider ─────────────────────────────────────────────────── */
+  .section-divider {
+    @apply w-full h-px my-0;
+    background: linear-gradient(to right, transparent, var(--border) 20%, var(--border) 80%, transparent);
   }
 }
 
-body {
-  margin: 0;
+/* =============================================================================
+   GLOBAL FOCUS RING
+   Uses :focus-visible so mouse users never see the ring (only keyboard users).
+   The ring uses the brand gold — consistent with the rest of the design system.
+   ============================================================================= */
+*:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
+/* Suppress outline on elements that handle their own focus style */
+.form-input:focus-visible,
+button:focus-visible {
+  outline: none; /* box-shadow handles focus for these */
+}
+
+/* =============================================================================
+   MOBILE TOUCH TARGET IMPROVEMENTS
+   Minimum 44×44px tap area per WCAG 2.5.5.
+   Applied to small interactive elements that might be finger-hard to hit.
+   ============================================================================= */
+@media (pointer: coarse) {
+  .form-label { cursor: default; }
+
+  /* Ensure swap button is always 44px+ on touch */
+  button[title="Swap stations"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* =============================================================================
+   SCROLL BEHAVIOUR
+   ============================================================================= */
+html {
+  scroll-behavior: smooth;
+  /* Prevent overscroll bounce on iOS from feeling janky */
+  overscroll-behavior-y: none;
+}
+
+/* Ensure sections targeted by anchor links aren't hidden under sticky navbar */
+section {
+  scroll-margin-top: 72px;
+}
+
+/* =============================================================================
+   SELECTION COLOUR
+   ============================================================================= */
+::selection {
+  background-color: var(--brand-light);
+  color: var(--brand);
+}
+
+/* =============================================================================
+   REDUCED MOTION
+   Respect user's OS setting — remove all animations for accessibility.
+   ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* =============================================================================
+   CUSTOM ANIMATIONS
+   ============================================================================= */
+@keyframes trainMove {
+  0%   { left: -50px; }
+  100% { left: calc(100% + 50px); }
+}
+
+.hero-section {
+  position: relative;
+  overflow: hidden;       /* clips train as it exits */
+  padding-bottom: 28px;  /* space for the train at bottom */
+}
+
+.train-track {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  /* Dotted gold line using repeating gradient */
+  background: repeating-linear-gradient(
+    to right,
+    rgba(240,192,64,0.5) 0px,
+    rgba(240,192,64,0.5) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+.train-emoji {
+  position: absolute;
+  bottom: 2px;     /* sits on top of the track line */
+  font-size: 22px;
+  line-height: 1;
+  animation: trainMove 8s linear infinite;
+}
+
+@keyframes dotBlink {
+  0%, 100% { opacity: 0.2; }
+  50%      { opacity: 1; }
+}
+.dot-1 { animation: dotBlink 1.2s infinite; }
+.dot-2 { animation: dotBlink 1.2s infinite; animation-delay: 0.2s; }
+.dot-3 { animation: dotBlink 1.2s infinite; animation-delay: 0.4s; }
+
+@keyframes trackFill {
+  0%   { width: 0%; }
+  60%  { width: 85%; }
+  75%  { width: 83%; }
+  90%  { width: 87%; }
+  100% { width: 85%; }
+}
+
+/* =============================================================================
+   STATION AUTOCOMPLETE STYLES
+   ============================================================================= */
+
+.station-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.station-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  z-index: 1000;
+
+  background: #fff;
+  border: 1px solid #dcdcdc;
+  border-radius: 10px;
+
+  max-height: 260px;
+  overflow-y: auto;
+
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  padding: 6px 0;
+}
+
+.form-grid,
+.booking-form,
+.ticket-card {
+  overflow: visible !important;
+}
+
+.station-option {
   display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+  align-items: center;
+  gap: 12px;
+
+  padding: 10px 14px;
+  cursor: pointer;
+
+  transition: background 0.2s ease;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+.station-option:hover,
+.station-option[aria-selected="true"] {
+  background: #f5f7fb;
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
+.dark .station-dropdown {
+  background: var(--bg-elevated);
+  border-color: var(--border);
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+.dark .station-option:hover,
+.dark .station-option[aria-selected="true"] {
+  background: var(--bg-secondary);
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
+.station-code {
+  font-size: 11px;
   padding: 4px 8px;
-  background: var(--code-bg);
+  border-radius: 3px;
+  background-color: #1a3a5c;
+  color: white;
+  min-width: 44px;
+  text-align: center;
+}
+
+.station-name {
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.station-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.station-dropdown::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+  border-radius: 10px;
+}
+
+.input-icon {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.55;
+  color: var(--text-tertiary);
+  pointer-events: none;
 }

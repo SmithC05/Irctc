@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- We add the font in index.html not in CSS
+         because index.html loads first. If added in CSS, there's
+         a brief flash of system font (FOUT — Flash Of Unstyled Text)
+         before the custom font loads. Preconnect hints tell the
+         browser to connect to Google Fonts early. -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,opsz,wght@0,6..18,300..800;1,6..18,300..800&display=swap" rel="stylesheet">
     <title>client</title>
   </head>
   <body>

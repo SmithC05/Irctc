@@ -1,122 +1,72 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+// =============================================================================
+// NammaRail — Root App Component
+// =============================================================================
 
-function App() {
-  const [count, setCount] = useState(0)
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { ToastProvider } from './components/ui/Toast';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 
+import HomePage                from './pages/HomePage';
+import SearchResultsPage       from './pages/SearchResultsPage';
+import TrainDetailPage         from './pages/TrainDetailPage';
+import PassengerFormPage       from './pages/PassengerFormPage';
+import BookingConfirmationPage from './pages/BookingConfirmationPage';
+import MyBookingsPage          from './pages/MyBookingsPage';
+import LoginPage               from './pages/LoginPage';
+import RegisterPage            from './pages/RegisterPage';
+import BookingDetailPage       from './pages/BookingDetailPage';
+
+// ─── 404 ──────────────────────────────────────────────────────────────────────
+function NotFoundPage() {
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-4"
+      style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="text-6xl">🚉</div>
+      <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>404 — Platform Not Found</h1>
+      <p style={{ color: 'var(--text-secondary)' }}>
+        This train doesn't stop here. Let's get you back on track.
+      </p>
+      <Link to="/" className="btn-primary mt-2">← Back to Home</Link>
+    </div>
+  );
 }
 
-export default App
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <BrowserRouter>
+        <Routes>
+          <Route path="/"                                       element={<HomePage />} />
+          <Route path="/search-results"                         element={<SearchResultsPage />} />
+          <Route path="/booking/:trainNumber"                   element={<TrainDetailPage />} />
+          <Route path="/login"                                  element={<LoginPage />} />
+          <Route path="/register"                               element={<RegisterPage />} />
+
+          {/* ── Protected routes — require a valid login session ─────────────
+              ProtectedRoute shows a spinner while auth state loads from
+              localStorage, then redirects to /login if not authenticated.
+              It passes location.pathname as state.from so LoginPage can
+              send the user back here after a successful login. */}
+          <Route path="/passengers" element={
+            <ProtectedRoute><PassengerFormPage /></ProtectedRoute>
+          } />
+          <Route path="/booking-confirmation/:bookingId" element={
+            <ProtectedRoute><BookingConfirmationPage /></ProtectedRoute>
+          } />
+          <Route path="/my-bookings" element={
+            <ProtectedRoute><MyBookingsPage /></ProtectedRoute>
+          } />
+          <Route path="/bookings/:bookingId" element={
+            <ProtectedRoute><BookingDetailPage /></ProtectedRoute>
+          } />
+
+          <Route path="*"                                       element={<NotFoundPage />} />
+        </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ToastProvider>
+  );
+}
