@@ -38,23 +38,20 @@ export default {
       // These map CSS variables defined in index.css to Tailwind utility classes.
       // Usage example: className="bg-bg-primary text-text-primary border-border"
       colors: {
-        // Background layers (light mode = warm ivory scale, dark mode = dark grays)
-        'bg-primary':   'var(--bg-primary)',
-        'bg-secondary': 'var(--bg-secondary)',
-        'bg-tertiary':  'var(--bg-tertiary)',
-
-        // Brand gold — the accent color for buttons, links, and highlights
-        'brand':        'var(--brand)',
-        'brand-hover':  'var(--brand-hover)',
-        'brand-light':  'var(--brand-light)',
-
-        // Text hierarchy (primary → secondary → tertiary = less emphasis each step)
-        'text-primary':   'var(--text-primary)',
-        'text-secondary': 'var(--text-secondary)',
-        'text-tertiary':  'var(--text-tertiary)',
-
-        // Subtle borders for cards, inputs, dividers
-        'border-color': 'var(--border)',
+        'bg-primary':    'var(--bg-primary)',
+        'bg-secondary':  'var(--bg-secondary)',
+        'bg-tertiary':   'var(--bg-tertiary)',
+        'bg-elevated':   'var(--bg-elevated)',
+        'brand':         'var(--brand)',
+        'brand-hover':   'var(--brand-hover)',
+        'brand-light':   'var(--brand-light)',
+        'brand-glow':    'var(--brand-glow)',
+        'text-primary':  'var(--text-primary)',
+        'text-secondary':'var(--text-secondary)',
+        'text-tertiary': 'var(--text-tertiary)',
+        'text-inverted': 'var(--text-inverted)',
+        'border-color':  'var(--border)',
+        'error':         'var(--error)',
       },
 
       // ── Font Family ─────────────────────────────────────────────────────
@@ -72,13 +69,17 @@ export default {
       borderRadius: {
         'xl':  '0.75rem',
         '2xl': '1rem',
+        '3xl': '1.25rem',
       },
 
       // ── Box Shadow ──────────────────────────────────────────────────────
       // Soft shadow for cards — warmer tone than Tailwind's default blue-gray.
       boxShadow: {
-        'card': '0 1px 4px 0 rgba(0,0,0,0.08), 0 4px 12px 0 rgba(0,0,0,0.06)',
-        'card-hover': '0 4px 16px 0 rgba(0,0,0,0.12), 0 8px 24px 0 rgba(0,0,0,0.08)',
+        'card':       '0 2px 8px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.05)',
+        'card-hover': '0 4px 16px rgba(0,0,0,0.10), 0 16px 40px rgba(0,0,0,0.08)',
+        'nav':        '0 1px 0 var(--border)',
+        'input':      '0 1px 2px rgba(0,0,0,0.04)',
+        'glow':       '0 0 0 3px var(--brand-glow)',
       },
     },
   },

@@ -18,7 +18,7 @@
 'use strict';
 
 const express = require('express');
-const { searchTrains, getTrainDetails } = require('../controllers/trainController');
+const { searchTrains, getTrainDetails, getStats } = require('../controllers/trainController');
 
 const router = express.Router();
 
@@ -32,6 +32,12 @@ const router = express.Router();
 // causing a confusing "train not found" error instead of running the search.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/search', searchTrains);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/trains/stats
+// Public — returns counts of trains, stations, and fares.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/stats', getStats);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/trains/:trainNumber

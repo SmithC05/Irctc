@@ -3,7 +3,7 @@
 // =============================================================================
 
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { login as loginApi } from '../api/authApi';
 import { useAuth } from '../context/AuthContext';
 import Layout from '../components/layout/Layout';
@@ -64,6 +64,16 @@ function LoginForm({ form, onChange, onSubmit, error, isLoading }) {
 export default function LoginPage() {
   const { login }   = useAuth();
   const navigate    = useNavigate();
+  const location    = useLocation();
+
+  // ── Redirect-after-login ─────────────────────────────────────────────────
+  // When ProtectedRoute redirects an unauthenticated user to /login, it passes
+  // the intended destination in location.state.from (e.g. '/my-bookings').
+  // After a successful login we send the user back there instead of always
+  // going to the homepage — they land exactly where they wanted to be.
+  // If there's no state.from (user navigated directly to /login), fall back to '/'.
+  const redirectTo = location.state?.from || '/';
+
   const [error, setError]       = useState('');
   const [isLoading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
@@ -81,7 +91,7 @@ export default function LoginPage() {
       const res = await loginApi(form.email, form.password);
       // Save token + user to AuthContext (and localStorage via the context login function)
       login(res.data.user, res.data.token);
-      navigate('/');
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError(err.response?.data?.error ?? 'Login failed. Please try again.');
     } finally {

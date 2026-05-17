@@ -4,6 +4,8 @@
 
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ToastProvider } from './components/ui/Toast';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 
 import HomePage                from './pages/HomePage';
 import SearchResultsPage       from './pages/SearchResultsPage';
@@ -33,21 +35,38 @@ function NotFoundPage() {
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
+    <ToastProvider>
+      <AuthProvider>
+        <BrowserRouter>
         <Routes>
           <Route path="/"                                       element={<HomePage />} />
           <Route path="/search-results"                         element={<SearchResultsPage />} />
           <Route path="/booking/:trainNumber"                   element={<TrainDetailPage />} />
-          <Route path="/passengers"                             element={<PassengerFormPage />} />
-          <Route path="/booking-confirmation/:bookingId"        element={<BookingConfirmationPage />} />
-          <Route path="/my-bookings"                            element={<MyBookingsPage />} />
-          <Route path="/bookings/:bookingId"                    element={<BookingDetailPage />} />
           <Route path="/login"                                  element={<LoginPage />} />
           <Route path="/register"                               element={<RegisterPage />} />
+
+          {/* ── Protected routes — require a valid login session ─────────────
+              ProtectedRoute shows a spinner while auth state loads from
+              localStorage, then redirects to /login if not authenticated.
+              It passes location.pathname as state.from so LoginPage can
+              send the user back here after a successful login. */}
+          <Route path="/passengers" element={
+            <ProtectedRoute><PassengerFormPage /></ProtectedRoute>
+          } />
+          <Route path="/booking-confirmation/:bookingId" element={
+            <ProtectedRoute><BookingConfirmationPage /></ProtectedRoute>
+          } />
+          <Route path="/my-bookings" element={
+            <ProtectedRoute><MyBookingsPage /></ProtectedRoute>
+          } />
+          <Route path="/bookings/:bookingId" element={
+            <ProtectedRoute><BookingDetailPage /></ProtectedRoute>
+          } />
+
           <Route path="*"                                       element={<NotFoundPage />} />
         </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+        </BrowserRouter>
+      </AuthProvider>
+    </ToastProvider>
   );
 }

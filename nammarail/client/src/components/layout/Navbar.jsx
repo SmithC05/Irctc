@@ -2,123 +2,173 @@
 // NammaRail — Navbar Component
 // =============================================================================
 //
-// WHY READ FROM AuthContext?
-// ─────────────────────────────────────────────────────────────────────────────
-// The Navbar is the single source of truth for "is anyone logged in?".
-// Instead of receiving `user` as a prop (which requires App → Layout → Navbar
-// prop drilling), it reads directly from AuthContext.
-// If the user logs out anywhere in the app, AuthContext updates, and this
-// Navbar re-renders automatically — no prop chain needed.
-//
-// MOBILE MENU PATTERN:
-// ─────────────────────────────────────────────────────────────────────────────
-// useState(false) tracks whether the hamburger menu is open.
-// Clicking the hamburger sets it to true (slide open).
-// Clicking a link or the backdrop sets it back to false (close).
+// Reads auth state directly from AuthContext — no prop drilling.
+// backdrop-blur gives the frosted glass effect on scroll.
 // =============================================================================
 
 import { useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Menu, X, BookOpen } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../ui/ThemeToggle';
 
 // ─── Logo ─────────────────────────────────────────────────────────────────────
 function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2 select-none">
-      {/* Unicode train emoji as a quick logo — replace with SVG if desired */}
-      <span className="text-xl">🚆</span>
-      <span className="text-lg font-bold tracking-tight" style={{ color: 'var(--brand)' }}>
-        NammaRail
+    <Link to="/" className="flex items-center gap-2 select-none group">
+      <div
+        className="flex items-center justify-center w-7 h-7 rounded-lg"
+        style={{ background: 'var(--brand-gradient)' }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="#FFFDF5" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 12h18M3 6h18M3 18h18" />
+          <circle cx="7" cy="18" r="2" fill="#FFFDF5" stroke="none" />
+          <circle cx="17" cy="18" r="2" fill="#FFFDF5" stroke="none" />
+        </svg>
+      </div>
+      <span
+        className="text-[16px] font-bold tracking-tight"
+        style={{ color: 'var(--text-primary)', letterSpacing: '-0.02em' }}
+      >
+        Namma<span style={{ color: 'var(--brand)' }}>Rail</span>
       </span>
     </Link>
   );
 }
 
-// ─── Desktop Navigation Links ─────────────────────────────────────────────────
+// ─── Vertical separator ───────────────────────────────────────────────────────
+function Sep() {
+  return (
+    <div
+      className="h-4 w-px mx-1"
+      style={{ backgroundColor: 'var(--border)' }}
+    />
+  );
+}
+
+// ─── Desktop nav ──────────────────────────────────────────────────────────────
 function DesktopNav({ user, onLogout }) {
-  const navLinkClass = ({ isActive }) =>
-    `text-sm font-medium transition-colors duration-150 ${
-      isActive ? 'text-brand border-b-2 border-brand pb-0.5' : 'hover:text-brand'
+  const linkClass = ({ isActive }) =>
+    `text-sm font-medium transition-colors duration-150 rounded px-1 ${
+      isActive ? '' : 'hover:opacity-80'
     }`;
 
   return (
-    <div className="hidden md:flex items-center gap-6">
+    <div className="hidden md:flex items-center gap-4">
       {user ? (
         <>
-          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Hi, {user.name.split(' ')[0]} 👋
+          <span className="text-sm font-medium" style={{ color: 'var(--text-tertiary)' }}>
+            {user.name.split(' ')[0]}
           </span>
-          <NavLink to="/my-bookings" className={navLinkClass} style={{ color: 'var(--text-primary)' }}>
+          <Sep />
+          <NavLink
+            to="/my-bookings"
+            className={linkClass}
+            style={({ isActive }) => ({
+              color: isActive ? 'var(--brand)' : 'var(--text-secondary)',
+            })}
+          >
             My Bookings
           </NavLink>
-          <button onClick={onLogout} className="btn-outline text-sm px-4 py-2">
-            Logout
+          <button onClick={onLogout} className="btn-outline text-xs px-3 py-1.5">
+            Sign out
           </button>
         </>
       ) : (
         <>
-          <NavLink to="/login" className={navLinkClass} style={{ color: 'var(--text-primary)' }}>
-            Login
+          <NavLink
+            to="/login"
+            className={linkClass}
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Sign in
           </NavLink>
-          <Link to="/register" className="btn-primary text-sm px-4 py-2">
-            Register
+          <Link to="/register" className="btn-primary text-xs px-4 py-2">
+            Get started
           </Link>
         </>
       )}
+      <Sep />
       <ThemeToggle />
     </div>
   );
 }
 
-// ─── Mobile Menu (slide-down) ─────────────────────────────────────────────────
+// ─── Mobile menu ──────────────────────────────────────────────────────────────
 function MobileMenu({ user, onLogout, onClose }) {
   return (
     <div
-      className="md:hidden border-t py-4 flex flex-col gap-3 px-4"
-      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}
+      className="md:hidden border-t px-5 py-4 flex flex-col gap-0.5"
+      style={{
+        borderColor: 'var(--border)',
+        backgroundColor: 'var(--bg-secondary)',
+      }}
     >
       {user ? (
         <>
-          <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-            Hi, {user.name} 👋
+          <p
+            className="text-[10px] font-bold uppercase tracking-[0.08em] px-3 py-2"
+            style={{ color: 'var(--text-tertiary)' }}
+          >
+            {user.name}
           </p>
-          <Link to="/my-bookings" onClick={onClose}
-            className="text-sm font-medium py-2" style={{ color: 'var(--text-primary)' }}>
+          <Link
+            to="/my-bookings"
+            onClick={onClose}
+            className="flex items-center gap-3 text-sm font-medium px-3 py-2.5 rounded-xl
+                       transition-colors duration-150"
+            style={{ color: 'var(--text-primary)' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            <BookOpen size={15} strokeWidth={1.75} style={{ color: 'var(--text-tertiary)' }} />
             My Bookings
           </Link>
-          <button onClick={() => { onLogout(); onClose(); }} className="btn-outline text-sm text-left">
-            Logout
+          <button
+            onClick={() => { onLogout(); onClose(); }}
+            className="flex items-center gap-3 text-sm font-medium px-3 py-2.5 rounded-xl
+                       transition-colors duration-150 text-left w-full"
+            style={{ color: 'var(--text-secondary)' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            Sign out
           </button>
         </>
       ) : (
         <>
-          <Link to="/login" onClick={onClose}
-            className="text-sm font-medium py-2" style={{ color: 'var(--text-primary)' }}>
-            Login
+          <Link
+            to="/login"
+            onClick={onClose}
+            className="text-sm font-medium px-3 py-2.5 rounded-xl
+                       transition-colors duration-150"
+            style={{ color: 'var(--text-primary)' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            Sign in
           </Link>
-          <Link to="/register" onClick={onClose} className="btn-primary text-sm text-center">
-            Register
+          <Link
+            to="/register"
+            onClick={onClose}
+            className="btn-primary text-sm text-center mt-1"
+          >
+            Get started
           </Link>
         </>
       )}
-      <div className="flex items-center gap-2">
+
+      <div
+        className="flex items-center gap-2.5 px-3 pt-3 mt-2 border-t"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <ThemeToggle />
-        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Toggle theme</span>
+        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          Switch appearance
+        </span>
       </div>
     </div>
-  );
-}
-
-// ─── Hamburger Icon ───────────────────────────────────────────────────────────
-function HamburgerIcon({ isOpen }) {
-  return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      {isOpen
-        ? <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        : <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-      }
-    </svg>
   );
 }
 
@@ -126,7 +176,13 @@ function HamburgerIcon({ isOpen }) {
 export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate         = useNavigate();
+  const location         = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Explain why Navbar is hidden on homepage:
+  // The existing Navbar needs to be HIDDEN on the homepage
+  // because the homepage has its own top bar and nav built in.
+  if (location.pathname === '/') return null;
 
   function handleLogout() {
     logout();
@@ -135,24 +191,38 @@ export default function Navbar() {
 
   return (
     <nav
-      className="sticky top-0 z-50 border-b shadow-sm"
-      style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+      className="sticky top-0 z-50 border-b"
+      style={{
+        // Semi-transparent frosted-glass background
+        backgroundColor: 'color-mix(in srgb, var(--bg-secondary) 88%, transparent)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        borderColor: 'var(--border)',
+        boxShadow: 'var(--shadow-navbar)',
+      }}
     >
-      <div className="container-app flex items-center justify-between h-16">
+      <div className="container-app flex items-center justify-between h-[58px]">
         <Logo />
         <DesktopNav user={user} onLogout={handleLogout} />
-        {/* Hamburger — only visible on mobile */}
+
+        {/* Mobile hamburger */}
         <button
-          className="md:hidden p-2 rounded-lg"
+          className="md:hidden flex items-center justify-center w-8 h-8 rounded-lg
+                     transition-colors duration-150"
           style={{ color: 'var(--text-secondary)' }}
           onClick={() => setMenuOpen(o => !o)}
-          aria-label="Toggle menu"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          <HamburgerIcon isOpen={menuOpen} />
+          {menuOpen
+            ? <X size={18} strokeWidth={2} />
+            : <Menu size={18} strokeWidth={2} />
+          }
         </button>
       </div>
 
-      {/* Slide-down mobile menu */}
       {menuOpen && (
         <MobileMenu
           user={user}

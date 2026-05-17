@@ -26,6 +26,7 @@ import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { createBooking } from '../api/bookingApi';
 import { useAuth } from '../context/AuthContext';
 import Layout from '../components/layout/Layout';
+import TrainLoader from '../components/ui/TrainLoader';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -207,84 +208,93 @@ export default function PassengerFormPage() {
         {/* LEFT — form */}
         <div className="flex-1 min-w-0">
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            {/* Passengers */}
-            <div className="card p-5">
-              <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>
-                Passenger Details
-              </p>
-              <div className="flex flex-col gap-3">
-                {passengers.map((pax, idx) => (
-                  <PassengerRow
-                    key={idx}
-                    index={idx}
-                    pax={pax}
-                    onChange={updatePassenger}
-                    onRemove={removePassenger}
-                    canRemove={passengers.length > 1}
-                  />
-                ))}
+            {/* Form replaced by Loader while processing */}
+            {isLoading ? (
+              <div className="card p-10 h-full flex items-center justify-center">
+                <TrainLoader message="Processing your booking" size="large" />
               </div>
-              {passengers.length < MAX_PASSENGERS && (
-                <button type="button" onClick={addPassenger} className="btn-outline text-sm mt-4">
-                  + Add Passenger
-                </button>
-              )}
-            </div>
+            ) : (
+              <>
+                {/* Passengers */}
+                <div className="card p-5">
+                  <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>
+                    Passenger Details
+                  </p>
+                  <div className="flex flex-col gap-3">
+                    {passengers.map((pax, idx) => (
+                      <PassengerRow
+                        key={idx}
+                        index={idx}
+                        pax={pax}
+                        onChange={updatePassenger}
+                        onRemove={removePassenger}
+                        canRemove={passengers.length > 1}
+                      />
+                    ))}
+                  </div>
+                  {passengers.length < MAX_PASSENGERS && (
+                    <button type="button" onClick={addPassenger} className="btn-outline text-sm mt-4">
+                      + Add Passenger
+                    </button>
+                  )}
+                </div>
 
-            {/* Booking type toggle */}
-            <div className="card p-5">
-              <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>Booking Type</p>
-              <div className="flex rounded-lg border overflow-hidden w-fit" style={{ borderColor: 'var(--border)' }}>
-                {['normal', 'tatkal'].map(type => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setBookingType(type)}
-                    className="px-6 py-2 text-sm font-semibold transition-all capitalize"
-                    style={{
-                      backgroundColor: bookingType === type ? 'var(--brand)' : 'transparent',
-                      color: bookingType === type ? 'white' : 'var(--text-secondary)',
-                    }}
-                  >
-                    {type === 'tatkal' ? '⚡ Tatkal' : 'Normal'}
+                {/* Booking type toggle */}
+                <div className="card p-5">
+                  <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>Booking Type</p>
+                  <div className="flex rounded-lg border overflow-hidden w-fit" style={{ borderColor: 'var(--border)' }}>
+                    {['normal', 'tatkal'].map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setBookingType(type)}
+                        className="px-6 py-2 text-sm font-semibold transition-all capitalize"
+                        style={{
+                          backgroundColor: bookingType === type ? 'var(--brand)' : 'transparent',
+                          color: bookingType === type ? 'white' : 'var(--text-secondary)',
+                        }}
+                      >
+                        {type === 'tatkal' ? '⚡ Tatkal' : 'Normal'}
+                      </button>
+                    ))}
+                  </div>
+                  {bookingType === 'tatkal' && (
+                    <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+                      ⚠️ Tatkal tickets are <strong>non-refundable</strong> on cancellation.
+                    </p>
+                  )}
+                </div>
+
+                {/* Contact */}
+                <div className="card p-5">
+                  <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>Contact Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="form-label">Phone</label>
+                      <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="10-digit mobile" className="form-input" />
+                    </div>
+                    <div>
+                      <label className="form-label">Email</label>
+                      <input value={user?.email ?? ''} readOnly className="form-input opacity-60 cursor-not-allowed" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Terms + submit */}
+                <div className="card p-5">
+                  <label className="flex items-start gap-3 cursor-pointer mb-4">
+                    <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5 accent-amber-600 w-4 h-4" />
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      I agree to the <span className="underline cursor-pointer" style={{ color: 'var(--brand)' }}>cancellation and refund policy</span>
+                    </span>
+                  </label>
+                  {error && <p className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>}
+                  <button type="submit" disabled={!canSubmit} className="btn-primary w-full py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed">
+                    Confirm Booking
                   </button>
-                ))}
-              </div>
-              {bookingType === 'tatkal' && (
-                <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
-                  ⚠️ Tatkal tickets are <strong>non-refundable</strong> on cancellation.
-                </p>
-              )}
-            </div>
-
-            {/* Contact */}
-            <div className="card p-5">
-              <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>Contact Details</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="form-label">Phone</label>
-                  <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="10-digit mobile" className="form-input" />
                 </div>
-                <div>
-                  <label className="form-label">Email</label>
-                  <input value={user?.email ?? ''} readOnly className="form-input opacity-60 cursor-not-allowed" />
-                </div>
-              </div>
-            </div>
-
-            {/* Terms + submit */}
-            <div className="card p-5">
-              <label className="flex items-start gap-3 cursor-pointer mb-4">
-                <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5 accent-amber-600 w-4 h-4" />
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  I agree to the <span className="underline cursor-pointer" style={{ color: 'var(--brand)' }}>cancellation and refund policy</span>
-                </span>
-              </label>
-              {error && <p className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>}
-              <button type="submit" disabled={!canSubmit} className="btn-primary w-full py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed">
-                {isLoading ? 'Confirming…' : 'Confirm Booking'}
-              </button>
-            </div>
+              </>
+            )}
           </form>
         </div>
 

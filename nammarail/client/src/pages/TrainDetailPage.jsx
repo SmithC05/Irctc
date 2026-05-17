@@ -25,7 +25,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { getTrainDetails } from '../api/trainApi';
 import StationTimeline from '../components/trains/StationTimeline';
 import Layout from '../components/layout/Layout';
-import LoadingSpinner from '../components/ui/LoadingSpinner';
+import TrainLoader from '../components/ui/TrainLoader';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -270,7 +270,7 @@ export default function TrainDetailPage() {
     });
   }
 
-  if (isLoading) return <Layout><LoadingSpinner text="Loading train details…" /></Layout>;
+  if (isLoading) return <Layout><TrainLoader message="Loading train details…" size="large" /></Layout>;
 
   if (error) return (
     <Layout>

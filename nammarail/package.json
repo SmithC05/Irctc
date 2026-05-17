@@ -1,0 +1,13 @@
+{
+  "name": "nammarail-monorepo",
+  "version": "1.0.0",
+  "description": "NammaRail - Full Stack Railway Booking System",
+  "scripts": {
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run server\" \"npm run client\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
