@@ -22,7 +22,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { searchTrains } from '../api/trainApi';
-import TrainCard from '../components/trains/TrainCard';
+import TrainCard, { generateMockAvailability } from '../components/trains/TrainCard';
 import Layout from '../components/layout/Layout';
 
 import TrainLoader from '../components/ui/TrainLoader';
@@ -35,11 +35,17 @@ const SORT_OPTIONS = [
   { value: 'fare',      label: 'Fare (Low to High)' },
 ];
 const CLASS_OPTIONS = ['SL', '3A', '2A', '1A', 'CC'];
+const TRAIN_TYPES = ['Express / Superfast', 'Shatabdi', 'Rajdhani', 'Vande Bharat', 'Special'];
+const QUOTA_OPTIONS = [
+  { value: 'general', label: 'General' },
+  { value: 'tatkal', label: 'Tatkal' },
+  { value: 'ladies', label: 'Ladies' },
+];
 
 function FilterSection({ title, children }) {
   return (
-    <div className="mb-5">
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--brand)' }}>
+    <div className="mb-4">
+      <p className="text-xs font-bold uppercase mb-2" style={{ color: 'var(--text-primary)' }}>
         {title}
       </p>
       {children}
@@ -52,53 +58,83 @@ function FilterContent({ filters, onChange }) {
     onChange(key, value);
   }
 
+  function toggleArrayItem(key, val) {
+    const arr = filters[key] || [];
+    const next = arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val];
+    toggle(key, next);
+  }
+
   return (
-    <div>
+    <div className="flex flex-col gap-1 text-sm">
       <FilterSection title="Sort By">
         {SORT_OPTIONS.map(opt => (
-          <label key={opt.value} className="flex items-center gap-2 mb-2 cursor-pointer">
+          <label key={opt.value} className="flex items-center gap-2 mb-1.5 cursor-pointer">
             <input
               type="radio"
               name="sortBy"
               value={opt.value}
               checked={filters.sortBy === opt.value}
               onChange={() => toggle('sortBy', opt.value)}
-              className="accent-amber-600"
+              style={{ accentColor: 'var(--brand)' }}
             />
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{opt.label}</span>
+            <span style={{ color: 'var(--text-secondary)' }}>{opt.label}</span>
           </label>
         ))}
       </FilterSection>
 
-      <FilterSection title="Class Filter">
+      <FilterSection title="Journey Class">
         {CLASS_OPTIONS.map(cls => (
-          <label key={cls} className="flex items-center gap-2 mb-2 cursor-pointer">
+          <label key={cls} className="flex items-center gap-2 mb-1.5 cursor-pointer">
             <input
               type="checkbox"
-              checked={filters.selectedClasses.includes(cls)}
-              onChange={() => {
-                const next = filters.selectedClasses.includes(cls)
-                  ? filters.selectedClasses.filter(c => c !== cls)
-                  : [...filters.selectedClasses, cls];
-                toggle('selectedClasses', next);
-              }}
-              className="accent-amber-600"
+              checked={(filters.selectedClasses || []).includes(cls)}
+              onChange={() => toggleArrayItem('selectedClasses', cls)}
+              style={{ accentColor: 'var(--brand)' }}
             />
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{cls}</span>
+            <span style={{ color: 'var(--text-secondary)' }}>{cls}</span>
+          </label>
+        ))}
+      </FilterSection>
+
+      <FilterSection title="Train Type">
+        {TRAIN_TYPES.map(type => (
+          <label key={type} className="flex items-center gap-2 mb-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={(filters.selectedTypes || []).includes(type)}
+              onChange={() => toggleArrayItem('selectedTypes', type)}
+              style={{ accentColor: 'var(--brand)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>{type}</span>
+          </label>
+        ))}
+      </FilterSection>
+
+      <FilterSection title="Quota">
+        {QUOTA_OPTIONS.map(q => (
+          <label key={q.value} className="flex items-center gap-2 mb-1.5 cursor-pointer">
+            <input
+              type="radio"
+              name="quotaFilter"
+              value={q.value}
+              checked={filters.quota === q.value}
+              onChange={() => toggle('quota', q.value)}
+              style={{ accentColor: 'var(--brand)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>{q.label}</span>
           </label>
         ))}
       </FilterSection>
 
       <FilterSection title="Availability">
         <label className="flex items-center gap-2 cursor-pointer">
-          <div
-            onClick={() => toggle('showAvailableOnly', !filters.showAvailableOnly)}
-            className={`w-10 h-5 rounded-full transition-all duration-200 flex items-center px-0.5 cursor-pointer`}
-            style={{ backgroundColor: filters.showAvailableOnly ? 'var(--brand)' : 'var(--bg-tertiary)' }}
-          >
-            <div className={`w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${filters.showAvailableOnly ? 'translate-x-5' : 'translate-x-0'}`} />
-          </div>
-          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Available trains only</span>
+          <input
+            type="checkbox"
+            checked={!!filters.showAvailableOnly}
+            onChange={() => toggle('showAvailableOnly', !filters.showAvailableOnly)}
+            style={{ accentColor: 'var(--brand)' }}
+          />
+          <span style={{ color: 'var(--text-secondary)' }}>Available trains only</span>
         </label>
       </FilterSection>
     </div>
@@ -109,11 +145,11 @@ function FilterContent({ filters, onChange }) {
 
 function FilterSidebar({ filters, onChange }) {
   return (
-    <aside className="hidden lg:block lg:w-64 shrink-0">
-      <div className="card p-5 sticky top-4">
+    <aside className="hidden lg:block lg:w-60 shrink-0">
+      <div className="card p-4 sticky top-4">
         {/* sticky top-4: the card follows the viewport as you scroll.
             IMPORTANT: sticky only works when the parent does NOT have overflow:hidden. */}
-        <p className="font-bold text-sm mb-5" style={{ color: 'var(--text-primary)' }}>Filters</p>
+        <p className="font-bold text-sm mb-4 pb-3 border-b border-gray-200 dark:border-gray-700" style={{ color: 'var(--text-primary)' }}>Filters</p>
         <FilterContent filters={filters} onChange={onChange} />
       </div>
     </aside>
@@ -176,14 +212,60 @@ function EmptyState({ from, to }) {
 
 // ─── Apply sorting & filtering ────────────────────────────────────────────────
 
-function applyFilters(trains, filters) {
+function getAvailableClasses(train) {
+  const CLASS_ORDER = ['SL', '3A', '2A', '1A', 'CC', '2S'];
+  let classes = CLASS_ORDER.filter(c => train.availability?.[c]);
+  if (classes.length === 0) {
+    if (train.fares && train.fares.length > 0) {
+      classes = train.fares.map(f => f.class);
+    } else {
+      classes = ['SL', '3A', '2A'];
+    }
+  }
+  return [...new Set(classes)].sort((a, b) => {
+    const idxA = CLASS_ORDER.indexOf(a);
+    const idxB = CLASS_ORDER.indexOf(b);
+    return (idxA !== -1 ? idxA : 99) - (idxB !== -1 ? idxB : 99);
+  });
+}
+
+function applyFilters(trains, filters, searchDate) {
   let list = [...trains];
 
-  // Filter: hide trains with no available seats in any class
-  if (filters.showAvailableOnly) {
-    list = list.filter(t =>
-      Object.values(t.availability ?? {}).some(a => a.CNF?.available > 0 || a.RAC?.available > 0)
-    );
+  // Journey Class filter
+  if (filters.selectedClasses?.length > 0) {
+    list = list.filter(t => {
+      const classes = getAvailableClasses(t);
+      return classes.some(c => filters.selectedClasses.includes(c));
+    });
+  }
+
+  // Filter: showAvailableOnly
+  // Keep trains where at least one class on the selected date is not REGRET or WL
+  if (filters.showAvailableOnly && searchDate) {
+    list = list.filter(t => {
+      const classes = getAvailableClasses(t);
+      return classes.some(c => {
+        const mock = generateMockAvailability(t.trainNumber, c, searchDate, filters.quota);
+        return !mock.isRegret && !mock.status.label.includes('WL');
+      });
+    });
+  }
+
+  // Filter: Train Type
+  if (filters.selectedTypes?.length > 0) {
+    list = list.filter(t => {
+      let type = t.trainType;
+      if (!type) {
+        const name = t.trainName.toLowerCase();
+        if (name.includes('shatabdi') || name.includes('jan shatabdi')) type = 'Shatabdi';
+        else if (name.includes('rajdhani')) type = 'Rajdhani';
+        else if (name.includes('vande bharat') || name.includes('vande metro')) type = 'Vande Bharat';
+        else if (name.includes('duronto') || name.includes('humsafar') || name.includes('tejas')) type = 'Special';
+        else type = 'Express / Superfast';
+      }
+      return filters.selectedTypes.includes(type);
+    });
   }
 
   // Sort
@@ -191,8 +273,21 @@ function applyFilters(trains, filters) {
     if (filters.sortBy === 'departure') return a.departureTime.localeCompare(b.departureTime);
     if (filters.sortBy === 'duration')  return (a.durationMins ?? 0) - (b.durationMins ?? 0);
     if (filters.sortBy === 'fare') {
-      const fa = a.fares?.length ? Math.min(...a.fares.map(f => f.total_fare)) : Infinity;
-      const fb = b.fares?.length ? Math.min(...b.fares.map(f => f.total_fare)) : Infinity;
+      const getMinFare = (t) => {
+        if (!searchDate) return Infinity;
+        const classes = getAvailableClasses(t);
+        let minF = Infinity;
+        classes.forEach(c => {
+          const mock = generateMockAvailability(t.trainNumber, c, searchDate, filters.quota);
+          if (mock.fare !== null && mock.fare < minF) {
+            minF = mock.fare;
+          }
+        });
+        return minF;
+      };
+      
+      const fa = getMinFare(a);
+      const fb = getMinFare(b);
       return fa - fb;
     }
     return 0;
@@ -225,6 +320,8 @@ export default function SearchResultsPage() {
   const [filters, setFilters] = useState({
     sortBy: 'departure',
     selectedClasses: [],
+    selectedTypes: [],
+    quota: searchParams.get('quota') || 'general',
     showAvailableOnly: false,
   });
 
@@ -252,7 +349,7 @@ export default function SearchResultsPage() {
     setFilters(prev => ({ ...prev, [key]: value }));
   }
 
-  const displayed = applyFilters(results, filters);
+  const displayed = applyFilters(results, filters, date);
 
   // Format the date for display, e.g. "Mon, 15 Jun 2026"
   const dateLabel = date
@@ -276,16 +373,36 @@ export default function SearchResultsPage() {
           </p>
         </div>
 
-        {/* Mobile: filter button */}
-        <button
-          onClick={() => setDrawer(true)}
-          className="lg:hidden btn-outline text-sm flex items-center gap-2 px-4 py-2"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M6 10h12M10 16h4"/>
-          </svg>
-          Filters
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Modify Search button */}
+          <button 
+            onClick={() => {
+              const params = new URLSearchParams({
+                from,
+                to,
+                fromName,
+                toName,
+                date,
+                quota,
+              });
+              navigate(`/?${params.toString()}`);
+            }} 
+            className="btn-outline text-sm px-4 py-2"
+          >
+            Modify Search
+          </button>
+
+          {/* Mobile: filter button */}
+          <button
+            onClick={() => setDrawer(true)}
+            className="lg:hidden btn-primary text-sm flex items-center gap-2 px-4 py-2"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M6 10h12M10 16h4"/>
+            </svg>
+            Filters
+          </button>
+        </div>
       </div>
 
       {/* Main layout: sidebar + cards */}

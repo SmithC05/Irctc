@@ -63,7 +63,7 @@
 // =============================================================================
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import StationAutocomplete from '../ui/StationAutocomplete';
 import DatePicker from '../ui/DatePicker';
 
@@ -86,14 +86,23 @@ const BORDER_CLR = '#e8e4d9';
 
 export default function SearchCard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const initFromCode = searchParams.get('from');
+  const initFromName = searchParams.get('fromName');
+  const initToCode = searchParams.get('to');
+  const initToName = searchParams.get('toName');
+  const initDate = searchParams.get('date');
+  const initClassCode = searchParams.get('class');
+  const initQuota = searchParams.get('quota');
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [activeTab,   setActiveTab]   = useState('book');
-  const [fromStation, setFromStation] = useState(null);
-  const [toStation,   setToStation]   = useState(null);
-  const [date,        setDate]        = useState(getTodayStr());
-  const [classCode,   setClassCode]   = useState('');
-  const [quota,       setQuota]       = useState('general');
+  const [fromStation, setFromStation] = useState(initFromCode ? { code: initFromCode, name: initFromName || initFromCode } : null);
+  const [toStation,   setToStation]   = useState(initToCode ? { code: initToCode, name: initToName || initToCode } : null);
+  const [date,        setDate]        = useState(initDate || getTodayStr());
+  const [classCode,   setClassCode]   = useState(initClassCode || '');
+  const [quota,       setQuota]       = useState(initQuota || 'general');
   const [errors,      setErrors]      = useState({});
   const [isSearching, setIsSearching] = useState(false);
   const [swapRotate,  setSwapRotate]  = useState(false);

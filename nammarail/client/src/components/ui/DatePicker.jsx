@@ -1,20 +1,53 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar as CalendarIcon, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function DatePicker({ value, onChange, minDate, maxDate }) {
   const [isOpen, setIsOpen] = useState(false);
   const [viewDate, setViewDate] = useState(new Date(value || new Date()));
   const containerRef = useRef(null);
+  const [portalStyle, setPortalStyle] = useState({});
 
   useEffect(() => {
     function handleOutsideClick(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      // Check if click is outside both the input container and the portal
+      if (
+        containerRef.current && 
+        !containerRef.current.contains(e.target) &&
+        !e.target.closest('.datepicker-portal')
+      ) {
         setIsOpen(false);
       }
     }
+
+    function updatePosition() {
+      if (isOpen && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setPortalStyle({
+          position: 'absolute',
+          top: rect.bottom + window.scrollY + 6,
+          left: rect.left + window.scrollX,
+          width: '280px',
+          zIndex: 9999,
+        });
+      }
+    }
+
     document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
+
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('resize', updatePosition);
+      // Listen to scroll on any scrollable parent to update position dynamically
+      window.addEventListener('scroll', updatePosition, true);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen]);
 
   const viewMonth = viewDate.getMonth();
   const viewYear = viewDate.getFullYear();
@@ -76,9 +109,9 @@ export default function DatePicker({ value, onChange, minDate, maxDate }) {
         <ChevronDown size={14} className="text-gray-500" />
       </div>
 
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-1.5 bg-secondary border border-border rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.12)] w-[280px] z-[9999] p-4"
-             style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+      {isOpen && createPortal(
+        <div className="datepicker-portal border border-border rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.12)] p-4"
+             style={{ ...portalStyle, backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
           <div className="flex justify-between items-center mb-4">
             <button onClick={handlePrevMonth} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#1a3a5c] hover:text-white transition-colors"
                     style={{ color: 'var(--text-primary)' }}>
@@ -135,7 +168,8 @@ export default function DatePicker({ value, onChange, minDate, maxDate }) {
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

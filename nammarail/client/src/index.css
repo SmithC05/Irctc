@@ -61,14 +61,7 @@
 }
 
 .dark {
-  /* ── Dark mode: warm charcoal — NOT pure black ─────────────────────
-     Surface scale (darkest → lightest):
-       bg-primary   #12110C  — page base, very dark warm brown-black
-       bg-secondary #1E1C15  — card surface, one step lighter
-       bg-tertiary  #272519  — input surface, toggle track
-       bg-elevated  #2E2C1F  — dropdowns, floating elements
-     This 4-stop scale creates real depth without flat lifeless blacks.
-  ─────────────────────────────────────────────────────────────────── */
+  /* ── Dark mode: warm charcoal — NOT pure black ───────────────────── */
   --bg-primary:      #12110C;
   --bg-secondary:    #1E1C15;
   --bg-tertiary:     #272519;
