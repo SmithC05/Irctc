@@ -1,81 +1,168 @@
+// =============================================================================
+// NammaRail — StatsBar (Full-width 3-column stats)
+// =============================================================================
+//
+// Fetches live stats from GET /api/trains/stats.
+// Falls back to hardcoded values if the API fails — we never show zeros.
+//
+// WHY THE PREVIOUS VERSION SHOWED 0 FOR STOPS AND FARES:
+// ─────────────────────────────────────────────────────────────────────────────
+// The old useCountUp hook returned its own `ref` per counter. Only the first
+// counter's ref (trains) was attached to the DOM. The other two hooks' refs
+// were detached — their IntersectionObservers never saw the element enter the
+// viewport, so their animations never fired and they stayed at 0.
+//
+// THE FIX — single shared IntersectionObserver:
+// We attach ONE ref to the container div. A single IntersectionObserver watches
+// that ref. When it triggers, we flip a shared `animated` state flag. All three
+// useCountUp calls receive `animated` as the `shouldStart` param and start
+// simultaneously when it becomes true.
+//
+// COUNT-UP ANIMATION:
+// IntersectionObserver fires the animation only when the bar enters the viewport.
+// Starting count-up immediately on page load would waste it if the user never
+// scrolls down. IntersectionObserver ensures the animation plays exactly when
+// the user first sees the numbers.
+//
+// INDIAN NUMBER FORMAT:
+// India groups numbers differently: 3,26,643 (not 326,643).
+// First group from right = 3 digits, subsequent groups = 2 digits.
+// toLocaleString('en-IN') handles this automatically.
+// Example: 326643 → "3,26,643"
+// =============================================================================
+
 import React, { useState, useEffect, useRef } from 'react';
 import { getStats } from '../../api/trainApi';
 
-// easeOut function makes counting start fast and slow at the end
 const easeOut = t => 1 - Math.pow(1 - t, 3);
 
-function useCountUp(target, duration = 2000) {
+// useCountUp — counts from 0 to `target` over `duration` ms,
+// but only starts when `shouldStart` becomes true.
+// This decouples "when to start" from the hook itself.
+function useCountUp(target, duration, shouldStart) {
   const [count, setCount] = useState(0);
-  const ref = useRef(null);
 
   useEffect(() => {
-    // IntersectionObserver fires a callback when an element enters or leaves the viewport.
-    // We use it to start the count-up only when the user can actually see the stats — 
-    // not immediately on page load when the section might be off-screen.
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && target > 0) {
-        let startTime = null;
-        const animate = (currentTime) => {
-          if (!startTime) startTime = currentTime;
-          const progress = Math.min((currentTime - startTime) / duration, 1);
-          setCount(Math.floor(easeOut(progress) * target));
-          if (progress < 1) requestAnimationFrame(animate);
-        };
-        requestAnimationFrame(animate);
-        observer.disconnect();
-      }
-    }, { threshold: 0.1 });
+    // Guard: don't start if the trigger hasn't fired, or if target is still 0
+    // (which happens before the API response arrives).
+    if (!shouldStart || target === 0) return;
 
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [target, duration]);
+    let startTime = null;
 
-  return { count, ref };
+    function step(timestamp) {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      setCount(Math.floor(easeOut(progress) * target));
+      if (progress < 1) requestAnimationFrame(step);
+    }
+
+    requestAnimationFrame(step);
+  // Re-run if target changes (e.g. API response arrives after animated is true)
+  // or if shouldStart flips to true.
+  }, [target, shouldStart, duration]);
+
+  return count;
 }
 
-export default function StatsBar() {
-  const [stats, setStats] = useState({ trainCount: 0, stationCount: 0, fareCount: 0 });
+// ── StatItem ──────────────────────────────────────────────────────────────────
+function StatItem({ number, label, isLast }) {
+  // toLocaleString('en-IN') gives Indian number grouping:
+  //   326643 → "3,26,643"  (not "326,643")
+  const formatted = number.toLocaleString('en-IN');
 
+  return (
+    <div style={{
+      padding: '14px 12px',
+      textAlign: 'center',
+      borderRight: isLast ? 'none' : '1px solid #e8dfc8',
+    }}>
+      <div
+        style={{ fontSize: 20, fontWeight: 700, color: '#1a3a5c', lineHeight: 1.2 }}
+        className="dark:text-[#f0c040]"
+      >
+        {formatted}
+      </div>
+      <div style={{
+        fontSize: 10,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: '#888',
+        marginTop: 4,
+      }}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+// ── StatsBar ──────────────────────────────────────────────────────────────────
+export default function StatsBar() {
+  const [stats, setStats]       = useState({ trainCount: 0, stationCount: 0, fareCount: 0 });
+  const [animated, setAnimated] = useState(false);
+  // ONE shared ref — attached to the grid container.
+  // ONE IntersectionObserver watches it, flips `animated` once, then disconnects.
+  const containerRef = useRef(null);
+
+  // ── Fetch stats from API ─────────────────────────────────────────────────
   useEffect(() => {
     getStats()
-      .then(res => setStats(res.data))
+      .then(res => {
+        // res.data = { trainCount, stationCount, fareCount }
+        setStats(res.data);
+      })
       .catch(() => {
-        // We always show a fallback so the stats
-        // section never displays zeros. Real data is preferred
-        // but hardcoded fallback is better than zeros.
+        // Fallback — never show zeros to the user
         setStats({ trainCount: 3292, stationCount: 71056, fareCount: 326643 });
       });
   }, []);
 
-  const { count: trains, ref: ref1 } = useCountUp(stats.trainCount);
-  const { count: stops } = useCountUp(stats.stationCount);
-  const { count: fares } = useCountUp(stats.fareCount);
+  // ── Single IntersectionObserver — shared by all three counters ───────────
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !animated) {
+          setAnimated(true);
+          observer.disconnect(); // fire once only
+        }
+      },
+      { threshold: 0.5 }
+    );
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  // animated is in deps so we stop observing if it gets set to true
+  }, [animated]);
 
-  // Indian number format groups differently from Western format.
-  // In India: 3,26,643 (first group is 3 digits from right, then 2 digits each). 
-  // toLocaleString('en-IN') handles this.
+  // ── Three count-up hooks, all sharing the same `animated` trigger ────────
+  const trains = useCountUp(stats.trainCount,   2000, animated);
+  const stops  = useCountUp(stats.stationCount, 2200, animated);
+  const fares  = useCountUp(stats.fareCount,    2500, animated);
+
+  const items = [
+    { value: trains, label: 'Trains in Database' },
+    { value: stops,  label: 'Station Stops'       },
+    { value: fares,  label: 'Fare Records'         },
+  ];
+
   return (
-    <div ref={ref1} className="bg-secondary border-y border-border py-4 mt-6">
-      <div className="max-w-5xl mx-auto px-5 flex justify-between text-center divide-x divide-border">
-        <div className="flex-1 px-2">
-          <div className="text-[18px] md:text-[20px] font-semibold text-[#1a3a5c] dark:text-[#f0c040]">
-            {trains.toLocaleString('en-IN')}
-          </div>
-          <div className="text-[10px] md:text-[11px] text-gray-500 uppercase tracking-widest mt-1">Trains in database</div>
-        </div>
-        <div className="flex-1 px-2">
-          <div className="text-[18px] md:text-[20px] font-semibold text-[#1a3a5c] dark:text-[#f0c040]">
-            {stops.toLocaleString('en-IN')}
-          </div>
-          <div className="text-[10px] md:text-[11px] text-gray-500 uppercase tracking-widest mt-1">Station stops</div>
-        </div>
-        <div className="flex-1 px-2">
-          <div className="text-[18px] md:text-[20px] font-semibold text-[#1a3a5c] dark:text-[#f0c040]">
-            {fares.toLocaleString('en-IN')}
-          </div>
-          <div className="text-[10px] md:text-[11px] text-gray-500 uppercase tracking-widest mt-1">Fare records</div>
-        </div>
-      </div>
+    <div
+      ref={containerRef}
+      className="dark:bg-[#1a1a1a] dark:border-[#2a2a2a]"
+      style={{
+        background: '#f5f0e6',
+        borderTop: '1px solid #e8dfc8',
+        borderBottom: '1px solid #e8dfc8',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr',
+      }}
+    >
+      {items.map((item, i) => (
+        <StatItem
+          key={i}
+          number={item.value}
+          label={item.label}
+          isLast={i === items.length - 1}
+        />
+      ))}
     </div>
   );
 }
