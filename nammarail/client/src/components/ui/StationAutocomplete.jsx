@@ -53,6 +53,7 @@
 // =============================================================================
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Search } from 'lucide-react';
 import { searchStations } from '../../api/trainApi';
@@ -126,7 +127,7 @@ function SelectedDisplay({ station, onClear }) {
 // flips to render above the input instead of below.
 function SuggestionDropdown({
   suggestions, isLoading, highlightedIndex,
-  onSelect, onHighlight, searchTerm, showAbove
+  onSelect, onHighlight, searchTerm, showAbove, portalStyles, dropdownRef
 }) {
   const listRef = useRef(null);
 
@@ -208,20 +209,17 @@ function SuggestionDropdown({
     </div>
   );
 
-  // Plain <div> — no transform, no stacking context created.
-  // CSS opacity transition provides a subtle fade-in without any side-effects.
-  // z-index:9999 is now free to apply against the page stacking context. ✓
-  return (
+  // Plain <div> rendered into document.body via Portal to bypass
+  // any deeply nested stacking contexts entirely.
+  // CSS opacity transition provides a subtle fade-in.
+  return createPortal(
     <div
+      ref={dropdownRef}
       role="listbox"
       aria-label="Station suggestions"
       style={{
         position: 'absolute',
-        ...(showAbove
-          ? { bottom: '100%', top: 'auto', marginBottom: 4 }
-          : { top: '100%',   bottom: 'auto', marginTop: 2 }),
-        left: 0,
-        right: 0,
+        ...portalStyles,
         zIndex: 9999,
         background: '#fff',
         border: '1px solid #e0e0e0',
@@ -230,14 +228,14 @@ function SuggestionDropdown({
         boxShadow: '0 8px 20px rgba(0,0,0,0.14)',
         maxHeight: 260,
         overflowY: 'auto',
-        // CSS transition for fade-in — achieves the same visual result
-        // as a motion.div animation but without creating a stacking context.
+        // CSS transition for fade-in
         opacity: 1,
         transition: 'opacity 0.15s ease',
       }}
     >
       {content}
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -266,16 +264,48 @@ export default function StationAutocomplete({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isFocused,        setIsFocused]        = useState(false);
   const [showAbove,        setShowAbove]        = useState(false);
+  const [portalStyles,     setPortalStyles]     = useState({});
 
   // containerRef is attached to the ROOT div (position:relative).
-  // This is the positioning anchor for the absolutely-positioned dropdown.
   const containerRef = useRef(null);
   const inputRef     = useRef(null);
+  const dropdownRef  = useRef(null);
+
+  // ── Portal Positioning ──────────────────────────────────────────────────────
+  const updateDropdownPosition = useCallback(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const willShowAbove = spaceBelow < 250;
+      setShowAbove(willShowAbove);
+
+      setPortalStyles({
+        width: rect.width,
+        left: rect.left + window.scrollX,
+        ...(willShowAbove
+          ? { top: rect.top + window.scrollY - 4, transform: 'translateY(-100%)' }
+          : { top: rect.bottom + window.scrollY + 2, transform: 'none' })
+      });
+    }
+  }, [isOpen, suggestions]);
+
+  useEffect(() => {
+    updateDropdownPosition();
+    window.addEventListener('resize', updateDropdownPosition);
+    window.addEventListener('scroll', updateDropdownPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateDropdownPosition);
+      window.removeEventListener('scroll', updateDropdownPosition, true);
+    };
+  }, [updateDropdownPosition]);
 
   // ── Outside click detection ────────────────────────────────────────────────
   useEffect(() => {
     function handleOutsideClick(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      if (
+        containerRef.current && !containerRef.current.contains(e.target) &&
+        (!dropdownRef.current || !dropdownRef.current.contains(e.target))
+      ) {
         setIsOpen(false);
         setIsFocused(false);
         if (!value) setInputText('');
@@ -284,16 +314,6 @@ export default function StationAutocomplete({
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [value]);
-
-  // ── Flip-above detection ────────────────────────────────────────────────────
-  // If there is less than 250px of space below the input to the viewport bottom,
-  // flip the dropdown to open above the input instead.
-  useEffect(() => {
-    if (isOpen && inputRef.current) {
-      const rect = inputRef.current.getBoundingClientRect();
-      setShowAbove(window.innerHeight - rect.bottom < 250);
-    }
-  }, [isOpen, suggestions]);
 
   // ── Debounced search ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -462,6 +482,8 @@ export default function StationAutocomplete({
           onHighlight={setHighlightedIndex}
           searchTerm={inputText}
           showAbove={showAbove}
+          portalStyles={portalStyles}
+          dropdownRef={dropdownRef}
         />
       )}
     </div>
