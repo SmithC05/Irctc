@@ -142,6 +142,36 @@ function runAdditiveMigrations(db) {
         console.log('  ✔  Migration M003: bookings.booking_type CHECK expanded to include curr_avl');
     }
 
+    // Migration M004: Add demand_tier + demand_reasoning to trains table.
+    // These columns are populated asynchronously by demandEnrichment.js after
+    // train import. NULL means "not yet classified"; runtime falls back to 'medium'.
+    if (!columnExists(db, 'trains', 'demand_tier')) {
+        db.exec(`
+            ALTER TABLE trains
+            ADD COLUMN demand_tier TEXT DEFAULT NULL
+                CHECK(demand_tier IN ('high', 'medium', 'low'));
+        `);
+        console.log('  ✔  Migration M004a: trains.demand_tier added');
+    }
+    if (!columnExists(db, 'trains', 'demand_reasoning')) {
+        db.exec(`
+            ALTER TABLE trains
+            ADD COLUMN demand_reasoning TEXT DEFAULT NULL;
+        `);
+        console.log('  ✔  Migration M004b: trains.demand_reasoning added');
+    }
+
+    // Migration M005: Add sim_days_before_journey to seat_inventory.
+    // Tracks the daysBeforeJourney at which this row was last simulated by
+    // worldEngine.js. NULL = never simulated (treated as d=60 at runtime).
+    if (!columnExists(db, 'seat_inventory', 'sim_days_before_journey')) {
+        db.exec(`
+            ALTER TABLE seat_inventory
+            ADD COLUMN sim_days_before_journey INTEGER DEFAULT NULL;
+        `);
+        console.log('  ✔  Migration M005: seat_inventory.sim_days_before_journey added');
+    }
+
     // The train_charts table is created by schema.sql via CREATE TABLE IF NOT EXISTS,
     // so no explicit migration needed here — just a log confirmation.
     const chartTable = db.prepare(

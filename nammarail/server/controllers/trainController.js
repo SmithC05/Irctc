@@ -14,6 +14,7 @@ const { validateJourneyDate, getDayColumn, getDayName, isValidDateFormat, isDate
 const { buildPhaseContext, getTrainPhase, getTatkalWindowStatus, PHASES } = require('../utils/phaseUtils');
 const { getChartStatus, getCurrAvlRemaining } = require('../utils/chartUtils');
 const { getBookingStatus, getNextWLNumber, getNextRACNumber } = require('../utils/seatUtils');
+const { materializeInventory } = require('../utils/worldEngine');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — Default seat capacities per class code.
@@ -74,24 +75,32 @@ function createInventoryIfMissing(trainId, journeyDate, classCode) {
         WHERE train_id = ? AND journey_date = ? AND class_code = ?
     `).get(trainId, journeyDate, classCode);
 
-    if (existing) return existing;
+    if (!existing) {
+        // Look up seat defaults for this class; fall back to generic defaults.
+        const defaults = SEAT_DEFAULTS[classCode] || DEFAULT_SEATS;
 
-    // Look up seat defaults for this class; fall back to generic defaults.
-    const defaults = SEAT_DEFAULTS[classCode] || DEFAULT_SEATS;
+        // Insert the new inventory row.
+        // The UNIQUE(train_id, journey_date, class_code) constraint in schema.sql
+        // prevents duplicates if two requests arrive simultaneously.
+        db.prepare(`
+            INSERT OR IGNORE INTO seat_inventory
+                (train_id, journey_date, class_code,
+                 total_seats, rac_total, tatkal_seats,
+                 wl_total)
+            VALUES (?, ?, ?, ?, ?, ?, 60)
+        `).run(trainId, journeyDate, classCode,
+               defaults.total_seats, defaults.rac_total, defaults.tatkal_seats);
+    }
 
-    // Insert the new inventory row.
-    // The UNIQUE(train_id, journey_date, class_code) constraint in schema.sql
-    // prevents duplicates if two requests arrive simultaneously.
-    db.prepare(`
-        INSERT OR IGNORE INTO seat_inventory
-            (train_id, journey_date, class_code,
-             total_seats, rac_total, tatkal_seats,
-             wl_total)
-        VALUES (?, ?, ?, ?, ?, ?, 60)
-    `).run(trainId, journeyDate, classCode,
-           defaults.total_seats, defaults.rac_total, defaults.tatkal_seats);
+    // Run the World Engine to catch up any simulated demand since last access.
+    // Must run after the row exists; reads sim_days_before_journey to know
+    // how many days to fast-forward.  The search request runs outside an explicit
+    // transaction, so we wrap just this call — better-sqlite3 transactions are
+    // safe to nest (inner becomes a no-op if already inside one).
+    const materialize = db.transaction(() => materializeInventory(trainId, journeyDate, classCode));
+    materialize();
 
-    // Fetch and return the freshly-inserted row.
+    // Fetch and return the freshly-updated row.
     return db.prepare(`
         SELECT * FROM seat_inventory
         WHERE train_id = ? AND journey_date = ? AND class_code = ?
@@ -820,4 +829,88 @@ function getAvailabilityGrid(req, res) {
     return res.status(200).json(result);
 }
 
-module.exports = { searchTrains, getTrainDetails, searchStations, getStats, getAvailabilityGrid };
+// =============================================================================
+// FUNCTION: adminAddTrain — POST /api/trains/admin
+// =============================================================================
+// Inserts a new train record and immediately kicks off async demand enrichment.
+// Protected by authenticateToken middleware in trainRoutes.js.
+//
+// WHY FIRE-AND-FORGET?
+// ────────────────────
+// The Gemini enrichment call can take 1–3 seconds (network round-trip).
+// Blocking the HTTP response until it completes would give the admin a poor UX
+// and ties up the Express worker thread unnecessarily.
+// Instead we respond immediately with the inserted train row, then asynchronously
+// update demand_tier in the background via setImmediate.
+// =============================================================================
+
+const { enrichTrainDemandTier } = require('../utils/demandEnrichment');
+
+function adminAddTrain(req, res) {
+    const {
+        id, name, from_station_code, to_station_code,
+        departure_time, arrival_time, duration_mins, distance_km,
+        runs_mon = 0, runs_tue = 0, runs_wed = 0, runs_thu = 0,
+        runs_fri = 0, runs_sat = 0, runs_sun = 0,
+    } = req.body;
+
+    // Basic validation.
+    if (!id || !name || !from_station_code || !to_station_code) {
+        return res.status(400).json({ error: 'id, name, from_station_code, to_station_code are required' });
+    }
+    if (isNaN(parseInt(id, 10))) {
+        return res.status(400).json({ error: 'id must be a numeric train number' });
+    }
+
+    const trainId = parseInt(id, 10);
+
+    // Check for duplicates.
+    const existing = db.prepare('SELECT id FROM trains WHERE id = ?').get(trainId);
+    if (existing) {
+        return res.status(409).json({ error: `Train ${trainId} already exists` });
+    }
+
+    // Insert the new train.
+    db.prepare(`
+        INSERT INTO trains
+            (id, name, from_station_code, to_station_code,
+             runs_mon, runs_tue, runs_wed, runs_thu, runs_fri, runs_sat, runs_sun,
+             departure_time, arrival_time, duration_mins, distance_km)
+        VALUES
+            (?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?)
+    `).run(
+        trainId, name.trim(), from_station_code.trim().toUpperCase(), to_station_code.trim().toUpperCase(),
+        runs_mon ? 1 : 0, runs_tue ? 1 : 0, runs_wed ? 1 : 0,
+        runs_thu ? 1 : 0, runs_fri ? 1 : 0, runs_sat ? 1 : 0, runs_sun ? 1 : 0,
+        departure_time || null, arrival_time || null,
+        duration_mins  ? parseInt(duration_mins, 10)  : null,
+        distance_km    ? parseInt(distance_km, 10)    : null
+    );
+
+    const inserted = db.prepare('SELECT * FROM trains WHERE id = ?').get(trainId);
+
+    // Respond immediately — demand enrichment happens in the background.
+    res.status(201).json({
+        message:       'Train added successfully. Demand enrichment is running in the background.',
+        train:         inserted,
+        demandTierNote: 'demand_tier will be set asynchronously by Gemini. Check GET /api/trains/:id for the updated value.',
+    });
+
+    // Fire-and-forget: enrich demand tier without blocking the response.
+    setImmediate(async () => {
+        try {
+            const tier = await enrichTrainDemandTier(inserted);
+            if (tier) {
+                console.log(`  ✔  Admin train ${trainId} (${name}) demand_tier classified as: ${tier}`);
+            } else {
+                console.log(`  ⚠  Admin train ${trainId} (${name}) enrichment skipped/failed — demand_tier stays NULL`);
+            }
+        } catch (err) {
+            console.error(`  ✘  Admin train enrichment exception for ${trainId}:`, err.message);
+        }
+    });
+}
+
+module.exports = { searchTrains, getTrainDetails, searchStations, getStats, getAvailabilityGrid, adminAddTrain };

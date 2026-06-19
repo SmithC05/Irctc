@@ -47,7 +47,15 @@ CREATE TABLE IF NOT EXISTS trains (
 
     -- Total route distance in km, taken from the last station's `distance` field
     -- in the stationList JSON array.
-    distance_km      INTEGER
+    distance_km      INTEGER,
+
+    -- Gemini-based demand classification. Set asynchronously by demandEnrichment.js.
+    -- NULL = not yet classified; runtime treats NULL as 'medium'.
+    demand_tier      TEXT DEFAULT NULL
+                     CHECK(demand_tier IN ('high', 'medium', 'low')),
+
+    -- Human-readable reasoning returned by Gemini alongside the demand_tier.
+    demand_reasoning TEXT DEFAULT NULL
 );
 
 
@@ -219,6 +227,11 @@ CREATE TABLE IF NOT EXISTS seat_inventory (
     -- Set by chartUtils.prepareChart(); incremented by each CURR_AVL booking.
     -- 0 until chart is PREPARED.
     curr_avl_filled  INTEGER NOT NULL DEFAULT 0,
+
+    -- World Engine simulation tracking.
+    -- Stores the daysBeforeJourney value at which this row was LAST simulated.
+    -- NULL = never simulated (worldEngine treats this as d=60, booking window just opened).
+    sim_days_before_journey INTEGER DEFAULT NULL,
 
     -- Prevents duplicate inventory records for the same train+date+class.
     -- The booking logic should UPDATE this row, not INSERT a new one.

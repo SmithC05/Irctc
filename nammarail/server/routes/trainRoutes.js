@@ -11,14 +11,17 @@
 //   GET /api/trains/12673?from=MAS&to=CBE&date=2024-06-15
 //       → trainController.getTrainDetails
 //
-// No authentication required — searching is a public action.
-// Booking (which IS sensitive) will have its own protected router later.
+//   POST /api/trains/admin    (requires JWT)
+//       → trainController.adminAddTrain
+//
+// No authentication required on GET routes — searching is a public action.
 // =============================================================================
 
 'use strict';
 
 const express = require('express');
-const { searchTrains, getTrainDetails, getStats, getAvailabilityGrid } = require('../controllers/trainController');
+const { searchTrains, getTrainDetails, getStats, getAvailabilityGrid, adminAddTrain } = require('../controllers/trainController');
+const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -38,6 +41,14 @@ router.get('/search', searchTrains);
 // Public — returns counts of trains, stations, and fares.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/stats', getStats);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/trains/admin
+// Protected — requires valid JWT.  Inserts a new train and triggers async
+// Gemini demand classification (fire-and-forget, does not block the response).
+// MUST be registered before /:trainNumber to avoid route collision.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin', authenticateToken, adminAddTrain);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/trains/:trainId/availability

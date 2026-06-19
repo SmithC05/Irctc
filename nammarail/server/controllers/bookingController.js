@@ -16,6 +16,7 @@ const { v4: uuidv4 }           = require('uuid');
 const { generatePNR }          = require('../utils/pnrGenerator');
 const db                       = require('../db/database');
 const { validateJourneyDate }  = require('../utils/dateUtils');
+const { materializeInventory } = require('../utils/worldEngine');
 const {
     getBookingStatus,
     getNextWLNumber,
@@ -63,16 +64,23 @@ function getOrCreateInventory(trainId, journeyDate, classCode) {
         WHERE train_id = ? AND journey_date = ? AND class_code = ?
     `).get(trainId, journeyDate, classCode);
 
-    if (existing) return existing;
+    if (!existing) {
+        const defaults = SEAT_DEFAULTS[classCode] || { total_seats: 50, rac_total: 12, tatkal_seats: 10 };
 
-    const defaults = SEAT_DEFAULTS[classCode] || { total_seats: 50, rac_total: 12, tatkal_seats: 10 };
+        db.prepare(`
+            INSERT OR IGNORE INTO seat_inventory
+                (train_id, journey_date, class_code, total_seats, rac_total, tatkal_seats, wl_total)
+            VALUES (?, ?, ?, ?, ?, ?, 60)
+        `).run(trainId, journeyDate, classCode,
+               defaults.total_seats, defaults.rac_total, defaults.tatkal_seats);
+    }
 
-    db.prepare(`
-        INSERT OR IGNORE INTO seat_inventory
-            (train_id, journey_date, class_code, total_seats, rac_total, tatkal_seats, wl_total)
-        VALUES (?, ?, ?, ?, ?, ?, 60)
-    `).run(trainId, journeyDate, classCode,
-           defaults.total_seats, defaults.rac_total, defaults.tatkal_seats);
+    // Run the World Engine inside the surrounding booking transaction.
+    // materializeInventory reads sim_days_before_journey and fast-forwards
+    // all elapsed days since last simulation before the booking logic reads
+    // the counters. No extra transaction wrapper needed here — we are already
+    // inside db.transaction() in createBooking.
+    materializeInventory(trainId, journeyDate, classCode);
 
     return db.prepare(`
         SELECT * FROM seat_inventory
