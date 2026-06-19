@@ -195,13 +195,23 @@ function getTatkalWindowStatus(classCode, journeyDate) {
 
     const isOpen = isOpensDay && nowMins >= openMins;
 
+    // minsUntilOpen: only meaningful when isOpensDay is true and window not yet open.
     let minsUntilOpen = 0;
     if (isOpensDay && !isOpen) {
         minsUntilOpen = openMins - nowMins;
     }
 
-    return { isOpen, openHour, opensOnDate, opensAt, minsUntilOpen };
+    // opensInDays: how many calendar days until the Tatkal opening day.
+    // 0  → today IS the opening day (use minsUntilOpen for the countdown).
+    // >0 → opening day is still N days away; render a static date label instead
+    //      of mounting a live countdown (which would start from 0 and mislead).
+    const todayMidnight  = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const opensDayMs     = new Date(opensOnDate + 'T00:00:00').getTime();
+    const opensInDays    = Math.max(0, Math.ceil((opensDayMs - todayMidnight.getTime()) / (1000 * 60 * 60 * 24)));
+
+    return { isOpen, openHour, opensOnDate, opensAt, minsUntilOpen, opensInDays };
 }
+
 
 /**
  * Returns the departure Date for a train (in IST, as a UTC timestamp).
@@ -252,6 +262,8 @@ function buildPhaseContext(journeyDate, departureTime, chartStatus = 'PENDING', 
             opensOnDate:  acTatkal.opensOnDate,  // same day for both (day before journey)
             acMinsUntilOpen: acTatkal.minsUntilOpen,
             slMinsUntilOpen: slTatkal.minsUntilOpen,
+            // opensInDays: 0 = opening day (use minsUntilOpen); >0 = render static date label
+            opensInDays:  acTatkal.opensInDays,
         },
         chartStatus,
         currAvlCount,

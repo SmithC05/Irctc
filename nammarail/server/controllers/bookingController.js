@@ -158,37 +158,81 @@ function getFareRecord(trainId, fromStation, toStation, classCode) {
     `).get(trainId, fromStation.toUpperCase(), toStation.toUpperCase(), classCode);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPER: updateInventoryAfterBooking
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Increments the correct counter(s) in seat_inventory after a successful booking.
+ * Atomically increments the correct counter(s) in seat_inventory after a booking.
  * Must be called INSIDE a transaction.
  *
- * @param {number} trainId
- * @param {string} journeyDate
- * @param {string} classCode
- * @param {string} status       - "CNF", "RAC", or "WL"
- * @param {boolean} isTatkal    - Also increment tatkal_filled if true
+ * Each counter is incremented in a SINGLE UPDATE that includes a capacity guard
+ * in its WHERE clause.  This closes the TOCTOU window: if two concurrent
+ * requests both pass the earlier JS availability check, only one will win here —
+ * the other will see result.changes === 0 and must be rejected.
+ *
+ * @returns {{ ok: boolean, failedCounter: string|null }}
+ *   ok = true  → all counters incremented successfully.
+ *   ok = false → a concurrent booking took the last seat; failedCounter names which.
  */
 function updateInventoryAfterBooking(trainId, journeyDate, classCode, status, isTatkal) {
-    // Build the SET clause dynamically based on booking outcome.
-    const increments = [];
+    // ── Step 1: Increment the status-based counter with a capacity guard ──────
+    if (status === 'CNF' && !isTatkal) {
+        // Normal CNF: must not exceed (total_seats - tatkal_seats)
+        const result = db.prepare(`
+            UPDATE seat_inventory
+               SET confirmed_seats = confirmed_seats + 1
+             WHERE train_id = ? AND journey_date = ? AND class_code = ?
+               AND confirmed_seats < (total_seats - tatkal_seats)
+        `).run(trainId, journeyDate, classCode);
 
-    if (status === 'CNF') increments.push('confirmed_seats = confirmed_seats + 1');
-    if (status === 'RAC') increments.push('rac_filled = rac_filled + 1');
-    if (status === 'WL')  increments.push('wl_filled = wl_filled + 1');
-    if (isTatkal)         increments.push('tatkal_filled = tatkal_filled + 1');
+        if (result.changes === 0) {
+            return { ok: false, failedCounter: 'confirmed_seats' };
+        }
+    }
 
-    if (increments.length === 0) return;
+    if (status === 'RAC') {
+        // RAC: must not exceed rac_total * 2 (2 passengers per RAC berth)
+        const result = db.prepare(`
+            UPDATE seat_inventory
+               SET rac_filled = rac_filled + 1
+             WHERE train_id = ? AND journey_date = ? AND class_code = ?
+               AND rac_filled < (rac_total * 2)
+        `).run(trainId, journeyDate, classCode);
 
-    db.prepare(`
-        UPDATE seat_inventory
-        SET    ${increments.join(', ')}
-        WHERE  train_id = ? AND journey_date = ? AND class_code = ?
-    `).run(trainId, journeyDate, classCode);
+        if (result.changes === 0) {
+            return { ok: false, failedCounter: 'rac_filled' };
+        }
+    }
+
+    if (status === 'WL') {
+        // WL: must not exceed wl_total (hard cap, default 60)
+        const result = db.prepare(`
+            UPDATE seat_inventory
+               SET wl_filled = wl_filled + 1
+             WHERE train_id = ? AND journey_date = ? AND class_code = ?
+               AND wl_filled < wl_total
+        `).run(trainId, journeyDate, classCode);
+
+        if (result.changes === 0) {
+            return { ok: false, failedCounter: 'wl_filled' };
+        }
+    }
+
+    // ── Step 2: Increment tatkal_filled with its own capacity guard ───────────
+    if (isTatkal) {
+        // Tatkal CNF: must not exceed tatkal_seats
+        const result = db.prepare(`
+            UPDATE seat_inventory
+               SET tatkal_filled = tatkal_filled + 1
+             WHERE train_id = ? AND journey_date = ? AND class_code = ?
+               AND tatkal_filled < tatkal_seats
+        `).run(trainId, journeyDate, classCode);
+
+        if (result.changes === 0) {
+            return { ok: false, failedCounter: 'tatkal_filled' };
+        }
+    }
+
+    return { ok: true, failedCounter: null };
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: bookSinglePassenger
@@ -317,8 +361,20 @@ function bookSinglePassenger(params) {
         passenger.name.trim(), parseInt(passenger.age, 10), passenger.gender, totalFare, pnrNumber
     );
 
-    // Update the inventory counters to reflect this booking.
-    updateInventoryAfterBooking(trainId, journeyDate, classCode, status, isTatkal);
+    // Update the inventory counters. The function uses atomic conditional UPDATEs
+    // (each guarded by a capacity WHERE clause) to close the TOCTOU window.
+    // If a concurrent request already took the last seat between our earlier read
+    // and this UPDATE, result.ok will be false — throw so the transaction rolls back.
+    const invUpdate = updateInventoryAfterBooking(trainId, journeyDate, classCode, status, isTatkal);
+    if (!invUpdate.ok) {
+        const err = invUpdate.failedCounter === 'tatkal_filled'
+            ? new Error('No Tatkal seats available — quota exhausted (concurrent booking)')
+            : new Error('No seats available — taken by a concurrent booking');
+        err.statusCode = 409;
+        err.code = invUpdate.failedCounter === 'tatkal_filled' ? 'TATKAL_CLOSED' : 'SEATS_EXHAUSTED';
+        throw err;
+    }
+
 
     // Build the human-readable status string (e.g. "WL/3", "RAC 5", "CNF").
     let statusDisplay = status;

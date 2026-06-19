@@ -472,6 +472,7 @@ export default function SearchResultsPage() {
               train={train}
               searchedClass={classCode}
               searchDate={date}
+              quota={quota}
             />
           ))}
         </div>

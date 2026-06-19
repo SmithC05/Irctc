@@ -55,7 +55,29 @@ export function getUIForStatus(item) {
   }
 }
 
-function TatkalTimer({ minsUntilOpen, onComplete }) {
+/**
+ * TatkalTimer renders differently based on opensInDays:
+ *   opensInDays > 0 → Tatkal opening day hasn't arrived yet.
+ *                     Show a static "Opens {date} at {time}" label.
+ *                     Do NOT mount a live countdown — minsUntilOpen is 0
+ *                     in this case, which would display "Opens in 0m 0s".
+ *   opensInDays === 0 → Today IS the opening day and the window is not yet
+ *                       open. minsUntilOpen is meaningful; count down in
+ *                       real time and call onComplete() when it hits zero.
+ */
+function TatkalTimer({ minsUntilOpen, opensInDays, opensOnDate, opensAt, onComplete }) {
+  // Static case: opening day is in the future — no live countdown.
+  if (opensInDays > 0) {
+    return (
+      <div className="flex flex-col items-center mt-1">
+        <span className="text-[9px] text-amber-600">Opens on</span>
+        <span className="text-[10px] font-bold text-amber-700">{opensOnDate}</span>
+        <span className="text-[9px] text-amber-600">at {opensAt}</span>
+      </div>
+    );
+  }
+
+  // Live countdown case: today is the opening day but window not yet open.
   const [timeLeft, setTimeLeft] = useState(minsUntilOpen * 60);
 
   useEffect(() => {
@@ -73,12 +95,12 @@ function TatkalTimer({ minsUntilOpen, onComplete }) {
   }, [minsUntilOpen, onComplete]);
 
   if (timeLeft <= 0) return <div className="text-[10px] text-amber-600 mt-1">Opening...</div>;
-  
+
   const h = Math.floor(timeLeft / 3600);
   const m = Math.floor((timeLeft % 3600) / 60);
   const s = Math.floor(timeLeft % 60);
   const display = h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
-  
+
   return (
     <div className="flex flex-col items-center mt-1">
       <span className="text-[9px] text-amber-600">Opens in</span>
@@ -208,7 +230,8 @@ function RouteStrip({ train }) {
 // Fetches REAL availability from the API for each date in the 6-day window.
 // Replaces the old generateMockAvailability() function.
 
-function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, tatkalStatus, onBook }) {
+function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, tatkalStatus, quota = 'general', onBook }) {
+  const navigate = useNavigate();
   const [loading,      setLoading]      = useState(true);
   const [data,         setData]         = useState([]);
   const [selectedDate, setSelectedDate] = useState(searchDate);
@@ -216,14 +239,12 @@ function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, tatkalSt
   async function fetchAvailability() {
     setLoading(true);
     try {
-      // Find what quota to use. Let's default to general unless tatkal is open and we want to book tatkal?
-      // For now, always 'general', the backend handles status correctly.
       const response = await getAvailabilityGrid(
         train.trainNumber,
         activeClass,
         searchDate || new Date().toISOString().split('T')[0],
         6,
-        'general',
+        quota,
         train.fromStation,
         train.toStation
       );
@@ -285,7 +306,27 @@ function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, tatkalSt
                   {ui.label}
                 </div>
                 {item.status === 'TATKAL_NOT_YET' && (
-                  <TatkalTimer minsUntilOpen={item.minsUntilOpen} onComplete={fetchAvailability} />
+                  <TatkalTimer
+                    minsUntilOpen={item.minsUntilOpen}
+                    opensInDays={item.opensInDays ?? 0}
+                    opensOnDate={item.opensOnDate}
+                    opensAt={item.opensAt}
+                    onComplete={fetchAvailability}
+                  />
+                )}
+                {/* FIX 4: When Tatkal quota is REGRET, offer a one-click switch to General. */}
+                {item.status === 'REGRET' && quota === 'tatkal' && (
+                  <button
+                    className="mt-1 text-[9px] text-blue-600 dark:text-blue-400 underline cursor-pointer leading-tight"
+                    onClick={e => {
+                      e.stopPropagation();
+                      const p = new URLSearchParams(window.location.search);
+                      p.set('quota', 'general');
+                      navigate(`/search-results?${p.toString()}`);
+                    }}
+                  >
+                    Tatkal full — check General
+                  </button>
                 )}
                 {item.status !== 'TATKAL_NOT_YET' && (
                   <p className="text-xs font-bold text-[var(--text-primary)] mt-1">
@@ -314,7 +355,7 @@ function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, tatkalSt
 
 const CLASS_ORDER = ['SL', '3A', '2A', '1A', 'CC', '2S'];
 
-export default function TrainCard({ train, searchedClass, searchDate }) {
+export default function TrainCard({ train, searchedClass, searchDate, quota = 'general' }) {
   const navigate = useNavigate();
 
   // Derive available classes from the API availability object.
@@ -386,6 +427,7 @@ export default function TrainCard({ train, searchedClass, searchDate }) {
             activeClass={activeClass}
             trainPhase={trainPhase}
             tatkalStatus={tatkalStatus}
+            quota={quota}
             onBook={handleBook}
           />
         )}

@@ -771,7 +771,8 @@ function getAvailabilityGrid(req, res) {
                 extraProps = {
                     opensAt: tatkalStatusObj.opensAt,
                     opensOnDate: tatkalStatusObj.opensOnDate,
-                    minsUntilOpen: tatkalStatusObj.minsUntilOpen
+                    minsUntilOpen: tatkalStatusObj.minsUntilOpen,
+                    opensInDays: tatkalStatusObj.opensInDays,
                 };
             } else {
                 const tatkalAvailable = Math.max(0, inv.tatkal_seats - inv.tatkal_filled);

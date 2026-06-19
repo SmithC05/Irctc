@@ -147,9 +147,10 @@ CREATE TABLE IF NOT EXISTS bookings (
     journey_date      TEXT    NOT NULL,       -- Format: YYYY-MM-DD
     class_code        TEXT    NOT NULL,
 
-    -- booking_type distinguishes regular quota from the surge-priced tatkal quota.
+    -- booking_type distinguishes regular quota, surge-priced tatkal, and post-chart
+    -- current availability (curr_avl) bookings.
     booking_type      TEXT    NOT NULL DEFAULT 'normal'
-                              CHECK(booking_type IN ('normal', 'tatkal')),
+                              CHECK(booking_type IN ('normal', 'tatkal', 'curr_avl')),
 
     -- Confirmation status mirrors Indian Railways conventions:
     -- CNF = Confirmed, RAC = Reservation Against Cancellation, WL = Waitlisted

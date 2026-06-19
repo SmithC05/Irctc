@@ -75,6 +75,73 @@ function runAdditiveMigrations(db) {
         console.log('  ✔  Migration M002: bookings.pnr_number added');
     }
 
+    // Migration M003: Expand bookings.booking_type CHECK to include 'curr_avl'.
+    // SQLite does not support ALTER TABLE ... ALTER COLUMN or modifying constraints
+    // in place. The only safe approach is the 12-step table-rebuild pattern:
+    //   1. Create new table with corrected constraint.
+    //   2. Copy all existing rows.
+    //   3. Drop old table.
+    //   4. Rename new table.
+    //
+    // Guard: check whether any 'curr_avl' row already exists. If one can be
+    // inserted without error, the constraint is already correct (fresh DB from
+    // updated schema.sql) and we skip. We detect old constraint by reading
+    // sqlite_master for the table DDL containing the old CHECK text.
+    const bookingsDDL = db.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='bookings'`
+    ).get();
+    const needsM003 = bookingsDDL && bookingsDDL.sql.includes(`'normal', 'tatkal'`)
+                   && !bookingsDDL.sql.includes(`'curr_avl'`);
+
+    if (needsM003) {
+        db.exec(`
+            PRAGMA foreign_keys = OFF;
+
+            CREATE TABLE bookings_new (
+                id                TEXT PRIMARY KEY,
+                user_id           TEXT    NOT NULL REFERENCES users(id),
+                train_id          INTEGER NOT NULL REFERENCES trains(id),
+                from_station_code TEXT    NOT NULL,
+                to_station_code   TEXT    NOT NULL,
+                journey_date      TEXT    NOT NULL,
+                class_code        TEXT    NOT NULL,
+                booking_type      TEXT    NOT NULL DEFAULT 'normal'
+                                  CHECK(booking_type IN ('normal', 'tatkal', 'curr_avl')),
+                status            TEXT    NOT NULL DEFAULT 'CNF'
+                                  CHECK(status IN ('CNF', 'RAC', 'WL', 'CANCELLED_WL')),
+                wl_number         INTEGER DEFAULT NULL,
+                rac_number        INTEGER DEFAULT NULL,
+                seat_number       TEXT    DEFAULT NULL,
+                passenger_name    TEXT    NOT NULL,
+                passenger_age     INTEGER NOT NULL,
+                passenger_gender  TEXT    NOT NULL CHECK(passenger_gender IN ('M', 'F', 'O')),
+                total_fare        INTEGER NOT NULL,
+                booked_at         TEXT    DEFAULT (datetime('now')),
+                cancelled_at      TEXT    DEFAULT NULL,
+                refund_amount     INTEGER DEFAULT NULL,
+                pnr_number        TEXT
+            );
+
+            INSERT INTO bookings_new
+                SELECT id, user_id, train_id, from_station_code, to_station_code,
+                       journey_date, class_code, booking_type, status,
+                       wl_number, rac_number, seat_number,
+                       passenger_name, passenger_age, passenger_gender,
+                       total_fare, booked_at, cancelled_at, refund_amount,
+                       pnr_number
+                FROM bookings;
+
+            DROP TABLE bookings;
+            ALTER TABLE bookings_new RENAME TO bookings;
+
+            CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
+            CREATE INDEX IF NOT EXISTS idx_bookings_train_date ON bookings(train_id, journey_date);
+
+            PRAGMA foreign_keys = ON;
+        `);
+        console.log('  ✔  Migration M003: bookings.booking_type CHECK expanded to include curr_avl');
+    }
+
     // The train_charts table is created by schema.sql via CREATE TABLE IF NOT EXISTS,
     // so no explicit migration needed here — just a log confirmation.
     const chartTable = db.prepare(
