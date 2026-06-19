@@ -13,6 +13,7 @@
 'use strict';
 
 const { v4: uuidv4 }           = require('uuid');
+const { generatePNR }          = require('../utils/pnrGenerator');
 const db                       = require('../db/database');
 const { validateJourneyDate }  = require('../utils/dateUtils');
 const {
@@ -21,10 +22,18 @@ const {
     getNextRACNumber,
     assignSeatNumber,
 } = require('../utils/seatUtils');
+const {
+    getTatkalWindowStatus,
+    getTrainPhase,
+    buildPhaseContext,
+    PHASES,
+    AC_CLASS_CODES,
+} = require('../utils/phaseUtils');
+const { getChartStatus, getCurrAvlRemaining } = require('../utils/chartUtils');
 
 // Valid values — used for input validation before touching the database.
 const VALID_CLASSES       = ['1A', '2A', '3A', 'SL', 'CC', '2S'];
-const VALID_BOOKING_TYPES = ['normal', 'tatkal'];
+const VALID_BOOKING_TYPES = ['normal', 'tatkal', 'curr_avl'];
 const VALID_GENDERS       = ['M', 'F', 'O'];
 const MAX_PASSENGERS      = 6;
 
@@ -95,7 +104,7 @@ function validateBookingBody(body) {
         return `classCode must be one of: ${VALID_CLASSES.join(', ')}`;
     }
     if (!VALID_BOOKING_TYPES.includes(bookingType)) {
-        return 'bookingType must be "normal" or "tatkal"';
+        return 'bookingType must be "normal", "tatkal", or "curr_avl"';
     }
     if (!Array.isArray(passengers) || passengers.length === 0) {
         return 'passengers must be a non-empty array';
@@ -195,22 +204,74 @@ function updateInventoryAfterBooking(trainId, journeyDate, classCode, status, is
  */
 function bookSinglePassenger(params) {
     const { trainId, fromStation, toStation, journeyDate,
-            classCode, bookingType, passenger, fareRecord, userId } = params;
+            classCode, bookingType, passenger, fareRecord, userId, pnrNumber } = params;
 
-    const isTatkal = bookingType === 'tatkal';
+    const isTatkal  = bookingType === 'tatkal';
+    const isCurrAvl = bookingType === 'curr_avl';
 
     // Read the LATEST inventory (may have changed if previous passengers
     // in this loop already took some seats).
     const inventory = getOrCreateInventory(trainId, journeyDate, classCode);
 
-    // Decide this passenger's status.
+    // ── CURR_AVL booking path ─────────────────────────────────────────────────
+    // After chart preparation, bypass normal allocation and book directly
+    // from the pool of vacant seats.
+    if (isCurrAvl) {
+        const remaining = getCurrAvlRemaining(db, trainId, journeyDate, classCode);
+        if (remaining <= 0) {
+            const err = new Error('No Current Availability (CURR_AVL) seats remaining');
+            err.statusCode = 409;
+            err.code = 'CURR_AVL_EXHAUSTED';
+            throw err;
+        }
+
+        const baseFare  = fareRecord ? (fareRecord.total_fare || 0) : 0;
+        const bookingId = uuidv4();
+
+        // CURR_AVL is always CNF — instant confirmation per the World Rules.
+        db.prepare(`
+            INSERT INTO bookings
+                (id, user_id, train_id, from_station_code, to_station_code,
+                 journey_date, class_code, booking_type, status,
+                 passenger_name, passenger_age, passenger_gender, total_fare, pnr_number)
+            VALUES
+                (?, ?, ?, ?, ?,
+                 ?, ?, 'curr_avl', 'CNF',
+                 ?, ?, ?, ?, ?)
+        `).run(
+            bookingId, userId, trainId,
+            fromStation.toUpperCase(), toStation.toUpperCase(),
+            journeyDate, classCode,
+            passenger.name.trim(), parseInt(passenger.age, 10), passenger.gender, baseFare, pnrNumber
+        );
+
+        // Increment curr_avl_filled in seat_inventory.
+        db.prepare(`
+            UPDATE seat_inventory
+               SET curr_avl_filled = curr_avl_filled + 1
+             WHERE train_id = ? AND journey_date = ? AND class_code = ?
+        `).run(trainId, journeyDate, classCode);
+
+        return {
+            bookingId,
+            name:       passenger.name.trim(),
+            age:        parseInt(passenger.age, 10),
+            gender:     passenger.gender,
+            status:     'CNF',
+            seatNumber: 'To be assigned',
+            fare:       baseFare,
+        };
+    }
+
+    // ── Normal / Tatkal booking path ──────────────────────────────────────────
     let status;
     if (isTatkal) {
         // Tatkal passengers get confirmed seats from the tatkal quota.
         const tatkalAvailable = inventory.tatkal_seats - inventory.tatkal_filled;
         if (tatkalAvailable <= 0) {
-            const err = new Error('No Tatkal seats available');
+            const err = new Error('No Tatkal seats available — quota exhausted');
             err.statusCode = 409;
+            err.code = 'TATKAL_CLOSED';
             throw err;
         }
         status = 'CNF';   // Tatkal is always CNF (no RAC/WL for tatkal)
@@ -243,17 +304,17 @@ function bookSinglePassenger(params) {
             (id, user_id, train_id, from_station_code, to_station_code,
              journey_date, class_code, booking_type, status,
              wl_number, rac_number, seat_number,
-             passenger_name, passenger_age, passenger_gender, total_fare)
+             passenger_name, passenger_age, passenger_gender, total_fare, pnr_number)
         VALUES
             (?, ?, ?, ?, ?,
              ?, ?, ?, ?,
              ?, ?, ?,
-             ?, ?, ?, ?)
+             ?, ?, ?, ?, ?)
     `).run(
         bookingId, userId, trainId, fromStation.toUpperCase(), toStation.toUpperCase(),
         journeyDate, classCode, bookingType, status,
         wlNumber, racNumber, seatNumber,
-        passenger.name.trim(), parseInt(passenger.age, 10), passenger.gender, totalFare
+        passenger.name.trim(), parseInt(passenger.age, 10), passenger.gender, totalFare, pnrNumber
     );
 
     // Update the inventory counters to reflect this booking.
@@ -272,6 +333,7 @@ function bookSinglePassenger(params) {
         status:     statusDisplay,
         seatNumber: seatNumber || 'To be assigned',
         fare:       totalFare,
+        pnrNumber,
     };
 }
 
@@ -308,24 +370,86 @@ function createBooking(req, res) {
 
     const trainId = parseInt(trainNumber, 10);
 
-    // Verify the train exists.
-    const train = db.prepare('SELECT id, name FROM trains WHERE id = ?').get(trainId);
+    // Verify the train exists and fetch departure time for phase checking.
+    const train = db.prepare('SELECT id, name, departure_time FROM trains WHERE id = ?').get(trainId);
     if (!train) {
         return res.status(404).json({ error: `Train ${trainNumber} not found` });
     }
 
-    // Fetch fare record once — the same fare applies to all passengers.
+    // ── RAILWAY GATE 1: ARP + Phase Check ────────────────────────────────────
+    // Read current chart status from DB (null = PENDING if no row exists).
+    const chartRow    = getChartStatus(db, trainId, journeyDate, classCode);
+    const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+    const phase       = getTrainPhase(journeyDate, train.departure_time, chartStatus);
+
+    // Booking unavailable — too far in advance or train has departed.
+    if (phase === PHASES.BOOKING_UNAVAILABLE) {
+        return res.status(409).json({
+            error:  'Booking unavailable: journey date is beyond the 60-day ARP window',
+            code:   'ARP_NOT_OPEN',
+            phase,
+        });
+    }
+    if (phase === PHASES.DEPARTED) {
+        return res.status(409).json({
+            error:  'Booking unavailable: train has already departed',
+            code:   'TRAIN_DEPARTED',
+            phase,
+        });
+    }
+
+    // ── RAILWAY GATE 2: Chart Gate ────────────────────────────────────────────
+    // After chart preparation, only CURR_AVL bookings are allowed.
+    if (chartStatus === 'PREPARED' && bookingType !== 'curr_avl') {
+        const currAvlLeft = getCurrAvlRemaining(db, trainId, journeyDate, classCode);
+        return res.status(409).json({
+            error:       'Chart has been prepared. Only Current Availability (CURR_AVL) bookings are now accepted.',
+            code:        'CHART_PREPARED',
+            phase:       PHASES.CHART_PREPARED,
+            currAvlLeft,
+        });
+    }
+    if (bookingType === 'curr_avl' && chartStatus !== 'PREPARED') {
+        return res.status(409).json({
+            error: 'CURR_AVL booking is only available after chart preparation',
+            code:  'CHART_NOT_PREPARED',
+            phase,
+        });
+    }
+
+    // ── RAILWAY GATE 3: Tatkal Time-Gate ──────────────────────────────────────
+    // Tatkal opens the day BEFORE the journey:
+    //   AC classes (1A, 2A, 3A, CC) at 10:00 IST
+    //   SL classes (SL, 2S)         at 11:00 IST
+    if (bookingType === 'tatkal') {
+        const tatkal = getTatkalWindowStatus(classCode, journeyDate);
+        if (!tatkal.isOpen) {
+            return res.status(409).json({
+                error:          `Tatkal booking for ${classCode} opens on ${tatkal.opensOnDate} at ${tatkal.opensAt} IST`,
+                code:           'TATKAL_NOT_OPEN',
+                opensOnDate:    tatkal.opensOnDate,
+                opensAt:        tatkal.opensAt,
+                minsUntilOpen:  tatkal.minsUntilOpen,
+                phase,
+            });
+        }
+    }
+
+    // ── All gates passed — proceed to seat allocation ──────────────────────────
     const fareRecord = getFareRecord(trainId, fromStation, toStation, classCode);
 
     const passengerResults = [];
     let totalFare = 0;
+    
+    // Generate one PNR for the whole transaction
+    const pnrNumber = generatePNR("22", journeyDate);
 
     // Wrap all passenger bookings in a single atomic transaction.
     const runTransaction = db.transaction(() => {
         for (const passenger of passengers) {
             const result = bookSinglePassenger({
                 trainId, fromStation, toStation, journeyDate,
-                classCode, bookingType, passenger, fareRecord, userId,
+                classCode, bookingType, passenger, fareRecord, userId, pnrNumber,
             });
             passengerResults.push(result);
             totalFare += result.fare;
@@ -337,11 +461,12 @@ function createBooking(req, res) {
     } catch (err) {
         // bookSinglePassenger throws with a statusCode on business logic failures.
         const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ error: err.message });
+        return res.status(statusCode).json({ error: err.message, code: err.code });
     }
 
     return res.status(201).json({
         bookingIds:  passengerResults.map(p => p.bookingId),
+        pnrNumber:   pnrNumber,
         trainNumber: train.id,
         trainName:   train.name,
         journeyDate,
@@ -351,6 +476,7 @@ function createBooking(req, res) {
         bookingType,
         passengers:  passengerResults,
         totalFare,
+        phase,
     });
 }
 
@@ -371,6 +497,7 @@ function getMyBookings(req, res) {
     const bookings = db.prepare(`
         SELECT
             b.id            AS bookingId,
+            b.pnr_number,
             b.train_id      AS trainNumber,
             t.name          AS trainName,
             b.from_station_code AS fromStation,
@@ -402,6 +529,7 @@ function getMyBookings(req, res) {
         if (!grouped[key]) {
             grouped[key] = {
                 trainNumber:  booking.trainNumber,
+                pnrNumber:    booking.pnr_number,
                 trainName:    booking.trainName,
                 fromStation:  booking.fromStation,
                 toStation:    booking.toStation,
@@ -413,6 +541,7 @@ function getMyBookings(req, res) {
         }
         grouped[key].passengers.push({
             bookingId:  booking.bookingId,
+            pnrNumber:  booking.pnr_number,
             name:       booking.passenger_name,
             age:        booking.passenger_age,
             gender:     booking.passenger_gender,
@@ -490,6 +619,7 @@ function getBookingById(req, res) {
 
     return res.status(200).json({
         bookingId:      booking.id,
+        pnrNumber:      booking.pnr_number,
         trainNumber:    booking.train_id,
         trainName:      booking.train_name,
         fromStation:    booking.from_station_code,
@@ -509,4 +639,4 @@ function getBookingById(req, res) {
     });
 }
 
-module.exports = { createBooking, getMyBookings, getBookingById };
+module.exports = { createBooking, getMyBookings, getBookingById, bookSinglePassenger, getFareRecord };

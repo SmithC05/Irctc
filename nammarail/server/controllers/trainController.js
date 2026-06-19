@@ -11,6 +11,9 @@
 
 const db = require('../db/database');
 const { validateJourneyDate, getDayColumn, getDayName, isValidDateFormat, isDateInPast } = require('../utils/dateUtils');
+const { buildPhaseContext, getTrainPhase, getTatkalWindowStatus, PHASES } = require('../utils/phaseUtils');
+const { getChartStatus, getCurrAvlRemaining } = require('../utils/chartUtils');
+const { getBookingStatus, getNextWLNumber, getNextRACNumber } = require('../utils/seatUtils');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — Default seat capacities per class code.
@@ -107,24 +110,35 @@ function createInventoryIfMissing(trainId, journeyDate, classCode) {
  * @param {Object} inv - A row from seat_inventory
  * @returns {Object} Structured availability block
  */
-function buildAvailabilityShape(inv) {
-    return {
+function buildAvailabilityShape(inv, chartInfo) {
+    const shape = {
         CNF: {
-            available:  inv.total_seats - inv.confirmed_seats,
+            available:  Math.max(0, inv.total_seats - (inv.confirmed_seats || 0)),
             totalSeats: inv.total_seats,
         },
         RAC: {
-            available:    inv.rac_total - inv.rac_filled,
+            available:    Math.max(0, inv.rac_total - (inv.rac_filled || 0)),
             totalCapacity: inv.rac_total,
         },
         WL: {
-            current:    inv.wl_filled,
+            current:    inv.wl_filled || 0,
             maxAllowed: inv.wl_total,
         },
         tatkal: {
-            available: inv.tatkal_seats - inv.tatkal_filled,
+            available: Math.max(0, inv.tatkal_seats - (inv.tatkal_filled || 0)),
         },
     };
+
+    // CURR_AVL is only shown if chart is PREPARED.
+    if (chartInfo && chartInfo.chartStatus === 'PREPARED') {
+        const filled = inv.curr_avl_filled || 0;
+        shape.CURR_AVL = {
+            available: Math.max(0, (chartInfo.currAvlCount || 0) - filled),
+            total:     chartInfo.currAvlCount || 0,
+        };
+    }
+
+    return shape;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,7 +305,6 @@ function fetchSegmentFares(trainId, fromCode, toCode, originCode, destCode, clas
  */
 function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, dayName) {
     // Segment distance = distance of TO stop minus distance of FROM stop.
-    // This gives the actual km the passenger will travel, not the full route.
     const distanceKm = (row.to_distance || 0) - (row.from_distance || 0);
 
     // Segment duration from actual stop-level times, accounting for day_count
@@ -309,17 +322,27 @@ function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, d
     // Build availability for each fare class (lazy-create inventory)
     const availabilityByClass = {};
     for (const fare of fares) {
-        const inv = createInventoryIfMissing(row.id, journeyDate, fare.class_code);
-        availabilityByClass[fare.class_code] = buildAvailabilityShape(inv);
+        const inv       = createInventoryIfMissing(row.id, journeyDate, fare.class_code);
+        const chartInfo = getChartStatus(db, row.id, journeyDate, fare.class_code);
+        availabilityByClass[fare.class_code] = buildAvailabilityShape(inv, chartInfo);
     }
+
+    // Compute phase context using departure_time from the FROM stop (actual_departure)
+    // We use the train-level departure_time for phase since that's what determines
+    // chart prep timing (T-4h before the train's DEPARTURE from origin).
+    const chartRow    = getChartStatus(db, row.id, journeyDate, null);
+    const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+    const currAvlCount = chartRow?.currAvlCount ?? 0;
+    const phaseContext = buildPhaseContext(
+        journeyDate, row.departure_time || row.actual_departure,
+        chartStatus, currAvlCount
+    );
 
     return {
         trainNumber:    row.id,
         trainName:      row.name,
-        // fromStation / toStation = what the passenger searched, not the train's endpoints
         fromStation:    searchFrom,
         toStation:      searchTo,
-        // Segment-specific times from the stations table stops
         departureTime:  row.actual_departure,
         arrivalTime:    row.actual_arrival,
         durationMins,
@@ -328,6 +351,8 @@ function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, d
         fareApproximate,
         availability:   availabilityByClass,
         fares,
+        // Agent Constitution API Contract: every response must include phase context
+        ...phaseContext,
     };
 }
 
@@ -528,10 +553,19 @@ function getTrainDetails(req, res) {
     const availabilityByClass = {};
     for (const fare of fares) {
         if (journeyDate) {
-            const inv = createInventoryIfMissing(trainNumber, journeyDate, fare.class_code);
-            availabilityByClass[fare.class_code] = buildAvailabilityShape(inv);
+            const inv       = createInventoryIfMissing(trainNumber, journeyDate, fare.class_code);
+            const chartInfo = getChartStatus(db, trainNumber, journeyDate, fare.class_code);
+            availabilityByClass[fare.class_code] = buildAvailabilityShape(inv, chartInfo);
         }
     }
+
+    // Build phase context for this train/date.
+    const chartRow    = journeyDate ? getChartStatus(db, trainNumber, journeyDate, null) : null;
+    const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+    const currAvlCount = chartRow?.currAvlCount ?? 0;
+    const phaseContext = journeyDate
+        ? buildPhaseContext(journeyDate, train.departure_time, chartStatus, currAvlCount)
+        : null;
 
     return res.status(200).json({
         trainNumber: train.id,
@@ -546,6 +580,7 @@ function getTrainDetails(req, res) {
         stations,
         fares,
         ...(journeyDate ? { journeyDate, availability: availabilityByClass } : {}),
+        ...(phaseContext || {}),
     });
 }
 
@@ -657,4 +692,131 @@ function getStats(req, res) {
     }
 }
 
-module.exports = { searchTrains, getTrainDetails, searchStations, getStats };
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCTION: getAvailabilityGrid — GET /api/trains/:trainId/availability
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getAvailabilityGrid(req, res) {
+    const trainId = parseInt(req.params.trainId, 10);
+    const { classCode, startDate, numDays, quota, from, to } = req.query;
+
+    if (isNaN(trainId) || !classCode || !startDate) {
+        return res.status(400).json({ error: 'trainId, classCode, and startDate are required' });
+    }
+
+    const days = parseInt(numDays, 10) || 6;
+    const train = db.prepare('SELECT * FROM trains WHERE id = ?').get(trainId);
+
+    if (!train) {
+        return res.status(404).json({ error: 'Train not found' });
+    }
+
+    const fromCode = (from || train.from_station_code).toUpperCase();
+    const toCode   = (to   || train.to_station_code).toUpperCase();
+
+    const fareRecords = fetchFareForClass(trainId, fromCode, toCode, classCode);
+    const fareObj = Array.isArray(fareRecords) ? fareRecords[0] : fareRecords;
+    const baseFare = fareObj ? (fareObj.total_fare || 0) : 0;
+    const tatkalExtra = fareObj ? (fareObj.tatkal_fare || 0) : 0;
+
+    const result = [];
+    const start = new Date(startDate);
+
+    for (let i = 0; i < days; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        // Ensure local string matches YYYY-MM-DD correctly without tz shifts
+        const isoDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+        const label = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+
+        const inv = createInventoryIfMissing(trainId, isoDate, classCode);
+        const chartRow = getChartStatus(db, trainId, isoDate, classCode);
+        const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+        
+        // We need departure time at the searched fromCode if available, otherwise train origin departure
+        const stopRow = db.prepare('SELECT departure_time FROM stations WHERE train_id = ? AND station_code = ?').get(trainId, fromCode);
+        const departureTime = stopRow?.departure_time && stopRow.departure_time !== '--' ? stopRow.departure_time : train.departure_time;
+
+        const phase = getTrainPhase(isoDate, departureTime, chartStatus);
+        
+        const isTatkal = quota === 'tatkal';
+        const totalFare = baseFare + (isTatkal ? tatkalExtra : 0);
+
+        let status = 'AVAILABLE';
+        let count = 0;
+        let isBookable = false;
+        let extraProps = {};
+
+        if (phase === PHASES.DEPARTED) {
+            status = 'REGRET';
+            isBookable = false;
+        } else if (phase === PHASES.BOOKING_UNAVAILABLE) {
+            status = 'NOT_YET';
+            isBookable = false;
+        } else if (phase === PHASES.CHART_PREPARED) {
+            status = 'CHART_PREPARED';
+            count = getCurrAvlRemaining(db, trainId, isoDate, classCode);
+            if (count > 0 && !isTatkal) {
+                // CURR_AVL available
+                status = 'AVAILABLE';
+                isBookable = true;
+            } else {
+                isBookable = false;
+            }
+        } else if (isTatkal) {
+            const tatkalStatusObj = getTatkalWindowStatus(classCode, isoDate);
+            if (!tatkalStatusObj.isOpen) {
+                status = 'TATKAL_NOT_YET';
+                isBookable = false;
+                extraProps = {
+                    opensAt: tatkalStatusObj.opensAt,
+                    opensOnDate: tatkalStatusObj.opensOnDate,
+                    minsUntilOpen: tatkalStatusObj.minsUntilOpen
+                };
+            } else {
+                const tatkalAvailable = Math.max(0, inv.tatkal_seats - inv.tatkal_filled);
+                if (tatkalAvailable > 0) {
+                    status = 'AVAILABLE';
+                    count = tatkalAvailable;
+                    isBookable = true;
+                } else {
+                    status = 'REGRET';
+                    isBookable = false;
+                }
+            }
+        } else {
+            // Normal booking
+            const bkStatus = getBookingStatus(inv);
+            if (bkStatus === 'CNF') {
+                status = 'AVAILABLE';
+                count = Math.max(0, (inv.total_seats - inv.tatkal_seats) - inv.confirmed_seats);
+                isBookable = true;
+            } else if (bkStatus === 'RAC') {
+                status = 'RAC';
+                count = getNextRACNumber(inv);
+                isBookable = true;
+            } else if (bkStatus === 'WL') {
+                status = 'WL';
+                count = getNextWLNumber(inv);
+                isBookable = true;
+            } else {
+                status = 'REGRET';
+                isBookable = false;
+            }
+        }
+
+        result.push({
+            date: isoDate,
+            label,
+            status,
+            count,
+            fare: totalFare,
+            isBookable,
+            ...extraProps
+        });
+    }
+
+    return res.status(200).json(result);
+}
+
+module.exports = { searchTrains, getTrainDetails, searchStations, getStats, getAvailabilityGrid };

@@ -18,7 +18,7 @@
 'use strict';
 
 const express = require('express');
-const { searchTrains, getTrainDetails, getStats } = require('../controllers/trainController');
+const { searchTrains, getTrainDetails, getStats, getAvailabilityGrid } = require('../controllers/trainController');
 
 const router = express.Router();
 
@@ -38,6 +38,13 @@ router.get('/search', searchTrains);
 // Public — returns counts of trains, stations, and fares.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/stats', getStats);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/trains/:trainId/availability
+// Public — returns a 6-day availability grid.
+// MUST be registered before /:trainNumber so it doesn't get masked.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/:trainId/availability', getAvailabilityGrid);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/trains/:trainNumber

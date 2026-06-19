@@ -22,10 +22,34 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { searchTrains } from '../api/trainApi';
-import TrainCard, { generateMockAvailability } from '../components/trains/TrainCard';
+import TrainCard from '../components/trains/TrainCard';
 import Layout from '../components/layout/Layout';
 
 import TrainLoader from '../components/ui/TrainLoader';
+
+/**
+ * Converts raw availability object from the API into display-ready data.
+ * Used for filtering and sorting logic locally.
+ */
+function buildAvailBadge(avail, trainPhase, fare) {
+  if (!avail) return { label: 'N/A', color: 'bg-gray-100 text-gray-400', isRegret: true, fare: null };
+
+  if (trainPhase === 'CHART_PREPARED' && avail.CURR_AVL) {
+    const n = avail.CURR_AVL.available;
+    if (n > 0)
+      return { label: `CURR_AVL ${n}`, color: 'bg-teal-600 text-white', isRegret: false, fare };
+    return { label: 'CURR_AVL 0', color: 'bg-gray-400 text-white', isRegret: true, fare: null };
+  }
+
+  if (avail.CNF?.available > 0)
+    return { label: `AVAIL-${avail.CNF.available}`, color: 'bg-green-600 text-white', isRegret: false, fare };
+  if (avail.RAC?.available > 0)
+    return { label: `RAC/${avail.RAC.available}`, color: 'bg-amber-600 text-white', isRegret: false, fare };
+  if (avail.WL?.current > 0)
+    return { label: `WL/${avail.WL.current}`, color: 'bg-red-600 text-white', isRegret: false, fare };
+
+  return { label: 'REGRET', color: 'text-gray-500 bg-gray-100 dark:bg-gray-800', isRegret: true, fare: null };
+}
 
 // ─── Filter Panel content ─────────────────────────────────────────────────────
 
@@ -217,7 +241,7 @@ function getAvailableClasses(train) {
   let classes = CLASS_ORDER.filter(c => train.availability?.[c]);
   if (classes.length === 0) {
     if (train.fares && train.fares.length > 0) {
-      classes = train.fares.map(f => f.class);
+      classes = train.fares.map(f => f.class_code);
     } else {
       classes = ['SL', '3A', '2A'];
     }
@@ -227,6 +251,13 @@ function getAvailableClasses(train) {
     const idxB = CLASS_ORDER.indexOf(b);
     return (idxA !== -1 ? idxA : 99) - (idxB !== -1 ? idxB : 99);
   });
+}
+
+function getFareForClass(t, c, quota) {
+  const fareObj = t.fares?.find(f => f.class_code === c);
+  if (!fareObj) return null;
+  const isTatkal = quota === 'tatkal';
+  return isTatkal && fareObj.tatkal_fare > 0 ? fareObj.tatkal_fare : fareObj.total_fare;
 }
 
 function applyFilters(trains, filters, searchDate) {
@@ -246,8 +277,10 @@ function applyFilters(trains, filters, searchDate) {
     list = list.filter(t => {
       const classes = getAvailableClasses(t);
       return classes.some(c => {
-        const mock = generateMockAvailability(t.trainNumber, c, searchDate, filters.quota);
-        return !mock.isRegret && !mock.status.label.includes('WL');
+        const fare = getFareForClass(t, c, filters.quota);
+        const avail = t.availability?.[c];
+        const badge = buildAvailBadge(avail, t.trainPhase, fare);
+        return !badge.isRegret && !badge.label.includes('WL');
       });
     });
   }
@@ -278,9 +311,11 @@ function applyFilters(trains, filters, searchDate) {
         const classes = getAvailableClasses(t);
         let minF = Infinity;
         classes.forEach(c => {
-          const mock = generateMockAvailability(t.trainNumber, c, searchDate, filters.quota);
-          if (mock.fare !== null && mock.fare < minF) {
-            minF = mock.fare;
+          const fare = getFareForClass(t, c, filters.quota);
+          const avail = t.availability?.[c];
+          const badge = buildAvailBadge(avail, t.trainPhase, fare);
+          if (badge.fare !== null && badge.fare < minF) {
+            minF = badge.fare;
           }
         });
         return minF;
@@ -437,7 +472,6 @@ export default function SearchResultsPage() {
               train={train}
               searchedClass={classCode}
               searchDate={date}
-              quota={quota}
             />
           ))}
         </div>

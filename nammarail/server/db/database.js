@@ -31,6 +31,61 @@ const DB_PATH     = path.join(__dirname, '..', '..', 'nammarail.db');
 const SCHEMA_PATH = path.join(__dirname, '..', '..', 'db', 'schema.sql');
 
 /**
+ * Checks whether a column exists in a table using PRAGMA table_info().
+ * SQLite returns one row per column; we look for the target column name.
+ *
+ * @param {Object} db        - better-sqlite3 instance
+ * @param {string} table     - table name
+ * @param {string} column    - column name to check for
+ * @returns {boolean}
+ */
+function columnExists(db, table, column) {
+    const info = db.pragma(`table_info(${table})`);
+    return info.some(col => col.name === column);
+}
+
+/**
+ * Runs additive schema migrations on every startup.
+ * Each migration is safe to run multiple times (idempotent).
+ *
+ * WHY NOT USE A MIGRATION FRAMEWORK?
+ * ─────────────────────────────────────────────────────────────────────────────
+ * NammaRail intentionally has no external migration library dependency.
+ * For a project of this size, a simple columnExists() check + ALTER TABLE
+ * is explicit, readable, and has zero extra dependencies.
+ *
+ * @param {Object} db - better-sqlite3 instance
+ */
+function runAdditiveMigrations(db) {
+    // Migration M001: Add curr_avl_filled to seat_inventory
+    // Introduced with the CURR_AVL / Chart Preparation system.
+    if (!columnExists(db, 'seat_inventory', 'curr_avl_filled')) {
+        db.exec(`
+            ALTER TABLE seat_inventory
+            ADD COLUMN curr_avl_filled INTEGER NOT NULL DEFAULT 0;
+        `);
+        console.log('  ✔  Migration M001: seat_inventory.curr_avl_filled added');
+    }
+
+    if (!columnExists(db, 'bookings', 'pnr_number')) {
+        db.exec(`
+            ALTER TABLE bookings
+            ADD COLUMN pnr_number TEXT;
+        `);
+        console.log('  ✔  Migration M002: bookings.pnr_number added');
+    }
+
+    // The train_charts table is created by schema.sql via CREATE TABLE IF NOT EXISTS,
+    // so no explicit migration needed here — just a log confirmation.
+    const chartTable = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='train_charts'`
+    ).get();
+    if (chartTable) {
+        console.log('  ✔  train_charts table: present');
+    }
+}
+
+/**
  * Opens the SQLite database, enforces foreign keys, and initialises the schema.
  *
  * Called once at module load time — the result is cached by Node's require()
@@ -38,8 +93,6 @@ const SCHEMA_PATH = path.join(__dirname, '..', '..', 'db', 'schema.sql');
  */
 function initDatabase() {
     // Open (or create) the database file at DB_PATH.
-    // The { verbose } option logs every SQL statement to the console in dev —
-    // remove it or gate it behind NODE_ENV === 'development' for production.
     const db = new Database(DB_PATH);
 
     // SQLite does NOT enforce foreign key constraints unless you tell it to,
@@ -51,6 +104,13 @@ function initDatabase() {
     // even when the database has already been populated by import.js.
     const schemaSql = fs.readFileSync(SCHEMA_PATH, 'utf8');
     db.exec(schemaSql);
+
+    // ── Additive Migrations ────────────────────────────────────────────────────
+    // SQLite does not support IF NOT EXISTS on ALTER TABLE ADD COLUMN.
+    // We use PRAGMA table_info() to check whether a column already exists before
+    // adding it. This keeps startup idempotent — safe to run on every server boot,
+    // even on a database that was already migrated.
+    runAdditiveMigrations(db);
 
     console.log(`✔  DB connection open: ${DB_PATH}`);
     return db;
