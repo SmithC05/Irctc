@@ -57,6 +57,10 @@ function getRefundNote(booking) {
   const type = (booking.booking_type ?? '').toLowerCase();
   if (type === 'tatkal') return 'No refund (Tatkal ticket)';
 
+  // CANCELLED_WL = automatically cancelled at chart prep time (full refund per World Rules)
+  const anyWLCancel = (booking.passengers ?? []).some(p => p.status === 'CANCELLED_WL');
+  if (anyWLCancel) return 'Full refund issued (WL auto-cancelled at chart preparation)';
+
   const refund = Number(booking.refund_amount ?? 0);
   if (refund <= 0) {
     const isLate = isWithin4Hours(booking.journey_date, booking.departure_time);
@@ -153,8 +157,9 @@ function JourneyMetaRow({ booking }) {
 function PassengerList({ passengers }) {
   if (!passengers?.length) return null;
 
-  const hasWL  = passengers.some(p => p.status?.toUpperCase().startsWith('WL'));
-  const hasRAC = passengers.some(p => p.status?.toUpperCase().startsWith('RAC'));
+  const hasWL        = passengers.some(p => p.status?.toUpperCase().startsWith('WL'));
+  const hasRAC       = passengers.some(p => p.status?.toUpperCase().startsWith('RAC'));
+  const hasCancelledWL = passengers.some(p => p.status === 'CANCELLED_WL');
 
   return (
     <div className="mb-3">
@@ -175,14 +180,21 @@ function PassengerList({ passengers }) {
       </div>
 
       {/* WL warning banner */}
-      {hasWL && (
+      {hasWL && !hasCancelledWL && (
         <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400">
           ⚠ Waitlisted — check status before travel
         </p>
       )}
 
+      {/* CANCELLED_WL banner (auto-cancelled at chart prep) */}
+      {hasCancelledWL && (
+        <p className="mt-2 text-xs font-medium text-orange-600 dark:text-orange-400">
+          📋 Auto-cancelled at chart preparation — full refund has been issued
+        </p>
+      )}
+
       {/* RAC info banner */}
-      {hasRAC && !hasWL && (
+      {hasRAC && !hasWL && !hasCancelledWL && (
         <p className="mt-2 text-xs font-medium text-blue-600 dark:text-blue-400">
           ℹ RAC — you may get a berth on chart preparation
         </p>
@@ -207,10 +219,15 @@ export default function BookingCard({ booking, type, onCancelClick }) {
   const pnr         = (booking.booking_id ?? booking.id ?? '').toUpperCase().slice(0, 8);
   const totalFare   = Number(booking.total_fare ?? 0);
 
+  // CANCELLED_WL = auto-cancelled at chart prep (different from user-initiated cancel)
+  const hasCancelledWL = passengers.some(p => p.status === 'CANCELLED_WL');
+
   // ── Left border colour by type ────────────────────────────────────────────
   const borderLeft = type === 'cancelled'
-    ? '4px solid #DC2626'        // red-600
-    : '4px solid var(--brand)';  // gold
+    ? hasCancelledWL
+      ? '4px solid #EA580C'     // orange-600 for auto-WL cancels (distinct from user-cancel)
+      : '4px solid #DC2626'     // red-600 for user-initiated cancels
+    : '4px solid var(--brand)'; // gold
 
   // ── Past cards are visually muted ─────────────────────────────────────────
   const cardOpacity = type === 'past' ? 'opacity-60' : '';

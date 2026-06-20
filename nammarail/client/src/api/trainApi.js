@@ -49,4 +49,9 @@ export const getTrainDetails = (trainNumber, from, to, date) =>
 export const searchStations = (query) =>
   api.get(`/stations/search?q=${encodeURIComponent(query)}`);
 
+export const getAvailabilityGrid = (trainId, classCode, startDate, numDays, quota = 'general', from = '', to = '') =>
+  api.get(`/trains/${trainId}/availability`, {
+    params: { classCode, startDate, numDays, quota, from, to },
+  });
+
 export const getStats = () => api.get('/trains/stats');

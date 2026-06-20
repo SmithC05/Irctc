@@ -18,6 +18,8 @@ const authRoutes    = require("./routes/authRoutes");
 const trainRoutes   = require("./routes/trainRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const stationRoutes = require("./routes/stationRoutes");
+const chartRoutes   = require("./routes/chartRoutes");
+const { startChartScheduler } = require("./schedulers/chartScheduler");
 
 // ─────────────────────────────────────────────
 // Create the Express app instance
@@ -123,6 +125,15 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/stations', stationRoutes);
 
 // ─────────────────────────────────────────────
+// Mount the chart router.
+// Provides chart status and admin trigger endpoints:
+//   GET  /api/trains/:trainNumber/chart?date=YYYY-MM-DD
+//   POST /api/admin/chart/prepare
+// ─────────────────────────────────────────────
+app.use('/api/trains', chartRoutes);
+app.use('/api',        chartRoutes);   // for /api/admin/chart/prepare
+
+// ─────────────────────────────────────────────
 // 404 handler — catches any route that doesn't match above
 // This middleware runs only if no earlier route handled the request.
 // `next` is not used here since this is the final fallback.
@@ -154,5 +165,10 @@ app.use((error, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚆 NammaRail server is running on http://localhost:${PORT}`);
   console.log(`📡 Health check → http://localhost:${PORT}/api/health`);
-  console.log(`🌐 Accepting requests from ${corsOptions.origin}`);
+
+  // ── Start the chart preparation scheduler ────────────────────────────────
+  // This must be started AFTER app.listen() so the DB is confirmed ready
+  // and the server is accepting connections. The scheduler runs in the same
+  // process and uses the shared db connection — no separate thread needed.
+  startChartScheduler();
 });

@@ -5,37 +5,64 @@
 // A reusable input with live station search dropdown.
 // Used for both "From" and "To" fields on the home page.
 //
-// UX IMPROVEMENTS IN THIS VERSION:
+// HOW DROPDOWN POSITIONING WORKS:
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. hasError prop: When the parent form detects a missing station, this prop
-//    turns the input border red — giving the user a direct visual cue without
-//    needing to read an error message first.
+// position:relative on the root div creates a new positioning context.
+// position:absolute on the dropdown makes it position relative to the nearest
+// ancestor with position:relative — which is now the root div.
+// This keeps the dropdown the same width as the input and places it directly
+// below, preventing it bleeding into sibling elements.
 //
-// 2. Keyboard scroll-into-view: When the user presses ArrowDown to move through
-//    suggestions, the highlighted item is scrolled into view automatically.
-//    Without this, items near the bottom of a long list are hidden.
+// WHY WE USE A PLAIN <div> FOR THE DROPDOWN (not motion.div):
+// ─────────────────────────────────────────────────────────────────────────────
+// CSS transform creates a stacking context even when the value is transform:none.
+// This is a known browser behaviour — the mere PRESENCE of the transform property
+// triggers stacking context creation, regardless of the value.
 //
-// 3. Min-character hint: While the input has fewer than 2 characters, a small
-//    hint "Type at least 2 characters to search" is shown. This explains the
-//    debounce threshold to users who wonder why nothing happens on the first key.
+// Framer Motion applies `transform` automatically to every motion.div element
+// as part of its animation engine (e.g. translateX(0px), translateY(0px)).
+// Even at rest this traps all child z-index values inside the motion.div's
+// stacking context, making z-index:9999 on the dropdown evaluate WITHIN the
+// motion wrapper rather than on the page.
 //
-// 4. No-results with search term: "No stations found for 'xyz'" is more
-//    informative than a generic "No stations found".
+// We deliberately avoid motion.div for the dropdown element. While Framer
+// Motion is excellent for UI animations, its transform-based engine creates
+// stacking contexts that interfere with z-index. For elements that need precise
+// z-index control (dropdowns, tooltips, modals), use plain divs with CSS
+// transitions instead.
 //
-// DEBOUNCING: 300ms after last keystroke before API fires.
-// OUTSIDE CLICK: document mousedown checks containerRef boundary.
-// KEYBOARD: ArrowDown/Up, Enter, Escape — full keyboard accessibility.
-// MOBILE: position:absolute dropdown scrolls with the form, not fixed to viewport.
+// Framer Motion is still used for:
+//   • SelectedDisplay — not a z-index-sensitive element ✓
+//   • The input fade (motion.div around the <input>) — same ✓
+//   • The min-character hint — same ✓
+//
+// OVERFLOW CHAIN:
+// Every ancestor between the root div and the page must have overflow:visible
+// (the default). overflow:hidden on any ancestor would clip the dropdown
+// regardless of z-index. SearchCard's field wrappers must never set overflow:hidden.
+//
+// UX FEATURES:
+// 1. hasError prop: Red border when parent form submits with empty field.
+// 2. Keyboard navigation: ArrowDown/Up, Enter, Escape — full a11y.
+// 3. Keyboard scroll: Highlighted item auto-scrolls into view.
+// 4. Min-character hint: "Type at least 2 characters" shown while < 2 chars typed.
+// 5. Flip-above: If insufficient space below, dropdown opens above the input.
+// 6. Outside click: mousedown listener closes dropdown on external clicks.
+//
+// DEBOUNCING: 280ms after last keystroke before API fires.
 // =============================================================================
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MapPin, Search } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 import { searchStations } from '../../api/trainApi';
 
 const ease = [0.22, 1, 0.36, 1];
 
 // ─── Selected station display ─────────────────────────────────────────────────
+// motion.div is fine here — SelectedDisplay is not z-index-sensitive.
+// It appears inline in the form, not as a floating overlay.
 function SelectedDisplay({ station, onClear }) {
   return (
     <motion.div
@@ -50,20 +77,17 @@ function SelectedDisplay({ station, onClear }) {
       }}
     >
       <div className="flex items-center gap-2.5 min-w-0">
-        {/* Station code tag */}
         <div
           className="flex-shrink-0 px-1.5 py-0.5 rounded-md text-xs font-bold tracking-wider"
           style={{ backgroundColor: 'var(--brand-light)', color: 'var(--brand)' }}
         >
           {station.code}
         </div>
-        {/* Station name */}
         <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
           {station.name}
         </p>
       </div>
 
-      {/* Clear button */}
       <motion.button
         type="button"
         onClick={onClear}
@@ -90,14 +114,25 @@ function SelectedDisplay({ station, onClear }) {
 }
 
 // ─── Dropdown list ────────────────────────────────────────────────────────────
+//
+// PLAIN <div> — NOT motion.div. See the file header for the full explanation.
+//
+// Summary: motion.div sets `transform` on the element which creates a CSS
+// stacking context. The dropdown's z-index:9999 would then be scoped inside
+// that stacking context instead of the page, causing sibling elements to
+// paint over it. A plain <div> with CSS opacity transition gives us the
+// fade-in without creating any stacking context.
+//
+// showAbove: when there is < 250px of space below the input, the dropdown
+// flips to render above the input instead of below.
 function SuggestionDropdown({
   suggestions, isLoading, highlightedIndex,
-  onSelect, onHighlight, searchTerm, showAbove
+  onSelect, onHighlight, searchTerm, showAbove, portalStyles, dropdownRef
 }) {
   const listRef = useRef(null);
 
-  // Scroll highlighted item into view when user navigates with keyboard
-  // Without this, items at the bottom of the list are hidden off-screen
+  // Scroll highlighted item into view when user navigates with keyboard.
+  // Without this, items near the bottom of the list are hidden off-screen.
   useEffect(() => {
     if (highlightedIndex < 0 || !listRef.current) return;
     const items = listRef.current.querySelectorAll('[role="option"]');
@@ -105,7 +140,6 @@ function SuggestionDropdown({
   }, [highlightedIndex]);
 
   const content = isLoading ? (
-    // Spinner while API is fetching
     <div className="flex items-center justify-center gap-2 py-4 px-4">
       <div
         className="w-4 h-4 rounded-full border-2 animate-spin flex-shrink-0"
@@ -116,16 +150,14 @@ function SuggestionDropdown({
       </span>
     </div>
   ) : suggestions.length === 0 ? (
-    // Informed empty state
     <div className="py-3 px-3 flex justify-center items-center text-center">
       <span className="text-[12px]" style={{ color: 'var(--text-tertiary)' }}>
         No stations found for '{searchTerm}'
       </span>
     </div>
   ) : (
-    // Results list — max 5 visible before scroll
     <div ref={listRef}>
-      {suggestions.slice(0, 5).map((s, i) => {
+      {suggestions.slice(0, 8).map((s, i) => {
         const isHighlighted = i === highlightedIndex;
         return (
           <div
@@ -134,14 +166,41 @@ function SuggestionDropdown({
             aria-selected={isHighlighted}
             onMouseDown={() => onSelect(s)}
             onMouseEnter={() => onHighlight(i)}
-            className="station-option"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '10px 14px',
+              cursor: 'pointer',
+              borderBottom: '0.5px solid #f0f0f0',
+              background: isHighlighted ? '#1a3a5c' : 'transparent',
+              transition: 'background 0.12s',
+            }}
           >
-            {/* Station code pill */}
-            <span className="station-code">
+            {/* Station code badge */}
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '2px 6px',
+              borderRadius: 3,
+              background: isHighlighted ? 'rgba(255,255,255,0.2)' : '#1a3a5c',
+              color: '#fff',
+              minWidth: 36,
+              textAlign: 'center',
+              flexShrink: 0,
+              letterSpacing: '0.03em',
+            }}>
               {s.code}
             </span>
             {/* Station name */}
-            <span className="station-name">
+            <span style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: isHighlighted ? '#fff' : '#1a1a18',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
               {s.name}
             </span>
           </div>
@@ -150,23 +209,33 @@ function SuggestionDropdown({
     </div>
   );
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0,  scale: 1    }}
-      exit={{    opacity: 0, y: -4, scale: 0.98  }}
-      transition={{ duration: 0.18, ease }}
-      // position:absolute removes the element from normal document
-      // flow — it no longer pushes other elements down. z-index:9999
-      // ensures it appears above ALL other elements on the page.
-      // station-dropdown applies absolute positioning, z-index, max-height, etc.
-      // We still conditionally apply bottom-full if showAbove is true to flip it.
-      className={`station-dropdown ${showAbove ? 'bottom-full !top-auto !mb-[6px]' : ''}`}
+  // Plain <div> rendered into document.body via Portal to bypass
+  // any deeply nested stacking contexts entirely.
+  // CSS opacity transition provides a subtle fade-in.
+  return createPortal(
+    <div
+      ref={dropdownRef}
       role="listbox"
       aria-label="Station suggestions"
+      style={{
+        position: 'absolute',
+        ...portalStyles,
+        zIndex: 9999,
+        background: '#fff',
+        border: '1px solid #e0e0e0',
+        borderTop: '2px solid #1a3a5c',
+        borderRadius: showAbove ? '6px 6px 0 0' : '0 0 6px 6px',
+        boxShadow: '0 8px 20px rgba(0,0,0,0.14)',
+        maxHeight: 260,
+        overflowY: 'auto',
+        // CSS transition for fade-in
+        opacity: 1,
+        transition: 'opacity 0.15s ease',
+      }}
     >
       {content}
-    </motion.div>
+    </div>,
+    document.body
   );
 }
 
@@ -195,14 +264,48 @@ export default function StationAutocomplete({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isFocused,        setIsFocused]        = useState(false);
   const [showAbove,        setShowAbove]        = useState(false);
+  const [portalStyles,     setPortalStyles]     = useState({});
 
+  // containerRef is attached to the ROOT div (position:relative).
   const containerRef = useRef(null);
   const inputRef     = useRef(null);
+  const dropdownRef  = useRef(null);
+
+  // ── Portal Positioning ──────────────────────────────────────────────────────
+  const updateDropdownPosition = useCallback(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const willShowAbove = spaceBelow < 250;
+      setShowAbove(willShowAbove);
+
+      setPortalStyles({
+        width: rect.width,
+        left: rect.left + window.scrollX,
+        ...(willShowAbove
+          ? { top: rect.top + window.scrollY - 4, transform: 'translateY(-100%)' }
+          : { top: rect.bottom + window.scrollY + 2, transform: 'none' })
+      });
+    }
+  }, [isOpen, suggestions]);
+
+  useEffect(() => {
+    updateDropdownPosition();
+    window.addEventListener('resize', updateDropdownPosition);
+    window.addEventListener('scroll', updateDropdownPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateDropdownPosition);
+      window.removeEventListener('scroll', updateDropdownPosition, true);
+    };
+  }, [updateDropdownPosition]);
 
   // ── Outside click detection ────────────────────────────────────────────────
   useEffect(() => {
     function handleOutsideClick(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      if (
+        containerRef.current && !containerRef.current.contains(e.target) &&
+        (!dropdownRef.current || !dropdownRef.current.contains(e.target))
+      ) {
         setIsOpen(false);
         setIsFocused(false);
         if (!value) setInputText('');
@@ -211,18 +314,6 @@ export default function StationAutocomplete({
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [value]);
-
-  useEffect(() => {
-    if (isOpen && inputRef.current) {
-      // We check how much space is below the input.
-      // If less than 250px (not enough for dropdown), we flip it
-      // to appear above the input instead. This prevents the
-      // dropdown from going off-screen at the bottom.
-      const rect = inputRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      setShowAbove(spaceBelow < 250);
-    }
-  }, [isOpen, suggestions]);
 
   // ── Debounced search ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -243,7 +334,7 @@ export default function StationAutocomplete({
       } finally {
         setIsLoading(false);
       }
-    }, 280); // Slightly tighter than 300ms for snappier feel
+    }, 280);
 
     return () => clearTimeout(timer);
   }, [inputText, excludeCode]);
@@ -285,22 +376,31 @@ export default function StationAutocomplete({
     }
   }
 
-  // ── Input focus border style ───────────────────────────────────────────────
-  // Priority order: error (red) > focused (brand gold) > default
+  // ── Input border style ─────────────────────────────────────────────────────
+  // Priority: error (red) > focused (brand gold) > default
   const inputBorderStyle = hasError && !isFocused
-    ? {
-        borderColor: 'var(--error)',
-        boxShadow: '0 0 0 3px var(--error-ring)',
-      }
+    ? { borderColor: 'var(--error)', boxShadow: '0 0 0 3px var(--error-ring)' }
     : {};
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  //
+  // ROOT DIV: position:relative — the dropdown's positioning anchor.
+  // No z-index, no animation, no transform → no stacking context created here.
+  //
+  // DROPDOWN: rendered as a direct child of this root div (sibling of the input
+  // container). It uses position:absolute + z-index:9999 with a plain <div>
+  // (not motion.div) so no transform stacking context interferes.
   return (
-    <div ref={containerRef} className="station-input-wrapper">
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', width: '100%' }}
+    >
       <label className="form-label" htmlFor={`station-autocomplete-${label.toLowerCase()}`}>
         {label}
       </label>
 
+      {/* Input area — shows either the selected station pill or the text input.
+          motion.div is fine here (not z-index-sensitive). */}
       <AnimatePresence mode="wait">
         {value ? (
           <SelectedDisplay key="selected" station={value} onClear={clearSelection} />
@@ -310,80 +410,82 @@ export default function StationAutocomplete({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.15 }}
+            style={{ position: 'relative' }}
           >
-            <div className="relative">
-              <input
-                ref={inputRef}
-                id={`station-autocomplete-${label.toLowerCase()}`}
-                type="text"
-                value={inputText}
-                onChange={e => {
-                  setInputText(e.target.value);
-                  setHighlightedIndex(-1);
-                }}
-                onKeyDown={handleKeyDown}
-                onFocus={() => {
-                  setIsFocused(true);
-                  if (suggestions.length > 0) setIsOpen(true);
-                }}
-                onBlur={() => setIsFocused(false)}
-                placeholder={placeholder}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                className="form-input pr-9"
-                style={inputBorderStyle}
-                aria-autocomplete="list"
-                aria-expanded={isOpen}
-                aria-haspopup="listbox"
-                aria-label={`${label} station`}
-              />
-              {/* Search icon inside input — turns into spinner while loading */}
-              {isLoading ? (
-                <div className="input-icon flex items-center justify-center">
-                  <div className="w-3.5 h-3.5 rounded-full border-2 animate-spin"
-                    style={{ borderColor: 'var(--border)', borderTopColor: 'var(--brand)' }} />
-                </div>
-              ) : (
-                <Search size={16} strokeWidth={2} className="input-icon" />
-              )}
-            </div>
-
-            {/* Minimum-character hint — shown only while typing < 2 chars */}
-            <AnimatePresence>
-              {inputText.length > 0 && inputText.length < 2 && (
-                <motion.p
-                  initial={{ opacity: 0, y: -3 }}
-                  animate={{ opacity: 1, y: 0  }}
-                  exit={{    opacity: 0         }}
-                  transition={{ duration: 0.15 }}
-                  className="mt-1.5 text-[11px]"
-                  style={{ color: 'var(--text-tertiary)' }}
-                >
-                  Type at least 2 characters to search
-                </motion.p>
-              )}
-            </AnimatePresence>
+            <input
+              ref={inputRef}
+              id={`station-autocomplete-${label.toLowerCase()}`}
+              type="text"
+              value={inputText}
+              onChange={e => {
+                setInputText(e.target.value);
+                setHighlightedIndex(-1);
+              }}
+              onKeyDown={handleKeyDown}
+              onFocus={() => {
+                setIsFocused(true);
+                if (suggestions.length > 0) setIsOpen(true);
+              }}
+              onBlur={() => setIsFocused(false)}
+              placeholder={placeholder}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              className="form-input pr-9"
+              style={inputBorderStyle}
+              aria-autocomplete="list"
+              aria-expanded={isOpen}
+              aria-haspopup="listbox"
+              aria-label={`${label} station`}
+            />
+            {/* Search icon / spinner — inside the input, not z-index-sensitive */}
+            {isLoading ? (
+              <div className="input-icon flex items-center justify-center">
+                <div className="w-3.5 h-3.5 rounded-full border-2 animate-spin"
+                  style={{ borderColor: 'var(--border)', borderTopColor: 'var(--brand)' }} />
+              </div>
+            ) : (
+              <Search size={16} strokeWidth={2} className="input-icon" />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Dropdown */}
+      {/* Min-character hint — motion.div is fine here (not z-index-sensitive) */}
       <AnimatePresence>
-        {!value && isOpen && (suggestions.length > 0 || isLoading) && (
-          <SuggestionDropdown
-            key="dropdown"
-            suggestions={suggestions}
-            isLoading={isLoading}
-            highlightedIndex={highlightedIndex}
-            onSelect={selectStation}
-            onHighlight={setHighlightedIndex}
-            searchTerm={inputText}
-            showAbove={showAbove}
-          />
+        {!value && inputText.length > 0 && inputText.length < 2 && (
+          <motion.p
+            initial={{ opacity: 0, y: -3 }}
+            animate={{ opacity: 1, y: 0  }}
+            exit={{    opacity: 0         }}
+            transition={{ duration: 0.15 }}
+            className="mt-1.5 text-[11px]"
+            style={{ color: 'var(--text-tertiary)' }}
+          >
+            Type at least 2 characters to search
+          </motion.p>
         )}
       </AnimatePresence>
+
+      {/* DROPDOWN — plain <div>, not motion.div.
+          See file header for full explanation. Short version:
+          motion.div sets `transform` which creates a CSS stacking context,
+          trapping z-index:9999 inside the motion wrapper.
+          Plain <div> + CSS opacity transition = same visual effect, no stacking context. */}
+      {!value && isOpen && (suggestions.length > 0 || isLoading) && (
+        <SuggestionDropdown
+          suggestions={suggestions}
+          isLoading={isLoading}
+          highlightedIndex={highlightedIndex}
+          onSelect={selectStation}
+          onHighlight={setHighlightedIndex}
+          searchTerm={inputText}
+          showAbove={showAbove}
+          portalStyles={portalStyles}
+          dropdownRef={dropdownRef}
+        />
+      )}
     </div>
   );
 }

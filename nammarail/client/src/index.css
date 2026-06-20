@@ -7,7 +7,7 @@
      3. @tailwind utilities  → Utility classes
    ============================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -61,14 +61,7 @@
 }
 
 .dark {
-  /* ── Dark mode: warm charcoal — NOT pure black ─────────────────────
-     Surface scale (darkest → lightest):
-       bg-primary   #12110C  — page base, very dark warm brown-black
-       bg-secondary #1E1C15  — card surface, one step lighter
-       bg-tertiary  #272519  — input surface, toggle track
-       bg-elevated  #2E2C1F  — dropdowns, floating elements
-     This 4-stop scale creates real depth without flat lifeless blacks.
-  ─────────────────────────────────────────────────────────────────── */
+  /* ── Dark mode: warm charcoal — NOT pure black ───────────────────── */
   --bg-primary:      #12110C;
   --bg-secondary:    #1E1C15;
   --bg-tertiary:     #272519;
@@ -146,7 +139,7 @@ main {
   body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
     overflow-y: scroll;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -433,20 +426,24 @@ section {
 
 .station-dropdown {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   left: 0;
   width: 100%;
-  z-index: 1000;
+  /* z-index: 9999 ensures the dropdown floats above ALL other page elements —
+     the card (z-index:10), the hero panel (z-index:0), and any other siblings.
+     If this were lower (e.g. 1000), the card's z-index:10 stacking context
+     would still contain it, but other fixed elements could overlap it. */
+  z-index: 9999;
 
   background: #fff;
-  border: 1px solid #dcdcdc;
-  border-radius: 10px;
+  border: 1px solid #e0e0e0;
+  border-top: 2px solid #1a3a5c;
+  border-radius: 0 0 6px 6px;
 
   max-height: 260px;
   overflow-y: auto;
 
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-  padding: 6px 0;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.14);
 }
 
 .form-grid,
@@ -474,11 +471,16 @@ section {
 .dark .station-dropdown {
   background: var(--bg-elevated);
   border-color: var(--border);
+  border-top-color: #f0c040;
 }
 
-.dark .station-option:hover,
-.dark .station-option[aria-selected="true"] {
-  background: var(--bg-secondary);
+.station-option:hover {
+  background: #1a3a5c !important;
+  color: #fff;
+}
+.station-option:hover .station-code,
+.station-option:hover .station-name {
+  color: #fff;
 }
 
 .station-code {

@@ -47,7 +47,15 @@ CREATE TABLE IF NOT EXISTS trains (
 
     -- Total route distance in km, taken from the last station's `distance` field
     -- in the stationList JSON array.
-    distance_km      INTEGER
+    distance_km      INTEGER,
+
+    -- Gemini-based demand classification. Set asynchronously by demandEnrichment.js.
+    -- NULL = not yet classified; runtime treats NULL as 'medium'.
+    demand_tier      TEXT DEFAULT NULL
+                     CHECK(demand_tier IN ('high', 'medium', 'low')),
+
+    -- Human-readable reasoning returned by Gemini alongside the demand_tier.
+    demand_reasoning TEXT DEFAULT NULL
 );
 
 
@@ -147,14 +155,16 @@ CREATE TABLE IF NOT EXISTS bookings (
     journey_date      TEXT    NOT NULL,       -- Format: YYYY-MM-DD
     class_code        TEXT    NOT NULL,
 
-    -- booking_type distinguishes regular quota from the surge-priced tatkal quota.
+    -- booking_type distinguishes regular quota, surge-priced tatkal, and post-chart
+    -- current availability (curr_avl) bookings.
     booking_type      TEXT    NOT NULL DEFAULT 'normal'
-                              CHECK(booking_type IN ('normal', 'tatkal')),
+                              CHECK(booking_type IN ('normal', 'tatkal', 'curr_avl')),
 
     -- Confirmation status mirrors Indian Railways conventions:
     -- CNF = Confirmed, RAC = Reservation Against Cancellation, WL = Waitlisted
+    -- CANCELLED_WL = auto-cancelled at chart preparation time (full refund issued)
     status            TEXT    NOT NULL DEFAULT 'CNF'
-                              CHECK(status IN ('CNF', 'RAC', 'WL')),
+                              CHECK(status IN ('CNF', 'RAC', 'WL', 'CANCELLED_WL')),
 
     -- Position numbers; NULL when not applicable.
     wl_number         INTEGER DEFAULT NULL,   -- Waitlist queue position (e.g. WL/3)
@@ -213,7 +223,58 @@ CREATE TABLE IF NOT EXISTS seat_inventory (
     tatkal_seats     INTEGER NOT NULL,    -- Tatkal quota = FLOOR(total_seats * 0.20)
     tatkal_filled    INTEGER NOT NULL DEFAULT 0,
 
+    -- CURR_AVL: seats that became vacant after chart preparation.
+    -- Set by chartUtils.prepareChart(); incremented by each CURR_AVL booking.
+    -- 0 until chart is PREPARED.
+    curr_avl_filled  INTEGER NOT NULL DEFAULT 0,
+
+    -- World Engine simulation tracking.
+    -- Stores the daysBeforeJourney value at which this row was LAST simulated.
+    -- NULL = never simulated (worldEngine treats this as d=60, booking window just opened).
+    sim_days_before_journey INTEGER DEFAULT NULL,
+
     -- Prevents duplicate inventory records for the same train+date+class.
     -- The booking logic should UPDATE this row, not INSERT a new one.
     UNIQUE(train_id, journey_date, class_code)
 );
+
+
+-- =============================================================================
+-- TABLE 7: train_charts
+-- Tracks chart preparation state per train, per date, per class.
+--
+-- Created by: chartUtils.prepareChart() (called by chartScheduler).
+-- One row per (train, date, class) after chart is prepared.
+--
+-- chart_status:
+--   'PENDING'  → chart not yet prepared (default assumed if no row exists)
+--   'PREPARED' → chart prepared, WL cancelled, CURR_AVL computed
+--
+-- curr_avl_count: number of vacant seats available via CURR_AVL booking
+--   after chart preparation. Decrements logically (tracked via curr_avl_filled
+--   in seat_inventory, not here).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS train_charts (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    train_id          INTEGER NOT NULL REFERENCES trains(id),
+    journey_date      TEXT    NOT NULL,    -- YYYY-MM-DD
+    class_code        TEXT    NOT NULL,
+
+    chart_status      TEXT    NOT NULL DEFAULT 'PENDING'
+                              CHECK(chart_status IN ('PENDING', 'PREPARED')),
+
+    -- Timestamp when the chart was prepared (IST stored as UTC).
+    chart_prepared_at TEXT    DEFAULT NULL,
+
+    -- Number of seats available via CURR_AVL after chart prep.
+    -- = total_seats - confirmed_seats - ceil(rac_filled/2) at time of preparation.
+    curr_avl_count    INTEGER NOT NULL DEFAULT 0,
+
+    -- Ensures we never have two chart records for the same train+date+class.
+    UNIQUE(train_id, journey_date, class_code)
+);
+
+-- Index for fast scheduler queries: "find all PENDING charts for today/tomorrow"
+CREATE INDEX IF NOT EXISTS idx_charts_date_status
+    ON train_charts(journey_date, chart_status);

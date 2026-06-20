@@ -20,9 +20,23 @@ const fs      = require('fs');
 const path    = require('path');
 const Database = require('better-sqlite3');
 
+// Load .env so GEMINI_API_KEY is available when this script is run directly.
+require('dotenv').config({ path: path.join(__dirname, '..', 'server', '.env') });
+
 // `parse` from csv-parse/sync gives us synchronous CSV parsing —
 // simpler than the streaming async API for a one-off import script.
 const { parse } = require('csv-parse/sync');
+
+// Gemini enrichment — classifies each train's demand tier after import.
+// Loaded lazily so the rest of the import works even without the SDK installed
+// in the db/ context (the SDK is in server/node_modules).
+function getDemandEnrichment() {
+    try {
+        return require('../server/utils/demandEnrichment');
+    } catch (e) {
+        return null;   // Not available in this environment — skip enrichment
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Path constants — all resolved relative to this file's directory so the
@@ -490,7 +504,7 @@ function printSummary(db, counts) {
  * Orchestrates all import steps in order.
  * The database connection is opened once and passed through each step.
  */
-function main() {
+async function main() {
     console.log('═══════════════════════════════════════════');
     console.log('   NammaRail — Database Import Starting    ');
     console.log('═══════════════════════════════════════════');
@@ -508,6 +522,16 @@ function main() {
 
     db.close();
     console.log('\n✔  Import complete. Database connection closed.\n');
+
+    // Step 6: Gemini demand enrichment (async, runs after DB is closed so
+    // demandEnrichment.js re-opens via server/db/database — the shared
+    // singleton used by the rest of the server).
+    const enrichment = getDemandEnrichment();
+    if (enrichment) {
+        await enrichment.enrichAllUnclassifiedTrains(1200);
+    } else {
+        console.log('  ℹ  demandEnrichment not available from db/ context — run enrichment separately.');
+    }
 }
 
 // Run main only when this file is executed directly (not when required as a module).

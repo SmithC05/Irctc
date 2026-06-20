@@ -38,10 +38,21 @@ const CLASS_LABELS = {
   '2S': 'Second Sitting',
 };
 
+// AC classes use Tatkal at 10:00; SL classes at 11:00.
+const AC_CLASSES = new Set(['1A', '2A', '3A', 'CC']);
+
 const DAYS_ABBR = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-function getAvailBadge(avail) {
+function getAvailBadge(avail, trainPhase) {
   if (!avail) return { text: 'N/A', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800' };
+
+  // CURR_AVL is shown when chart is prepared.
+  if (trainPhase === 'CHART_PREPARED' && avail.CURR_AVL) {
+    const n = avail.CURR_AVL.available;
+    if (n > 0) return { text: `CURR_AVL ${n}`, cls: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300' };
+    return { text: 'CURR_AVL 0', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800' };
+  }
+
   if (avail.CNF?.available > 0)
     return { text: `CNF ${avail.CNF.available}`, cls: 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' };
   if (avail.RAC?.available > 0)
@@ -49,6 +60,47 @@ function getAvailBadge(avail) {
   if (avail.WL?.current > 0)
     return { text: `WL ${avail.WL.current}`, cls: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400' };
   return { text: 'N/A', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800' };
+}
+
+// ─── Phase Alert Banner ───────────────────────────────────────────────────────
+//
+// Displays a contextual alert based on the current train phase.
+// The client reads phase from the server response — never computes it locally.
+
+function PhaseAlert({ trainPhase, tatkalStatus, currAvlCount }) {
+  if (!trainPhase || trainPhase === 'ARP_OPEN') return null;
+
+  const configs = {
+    TATKAL_OPEN: {
+      text: `⚡ Tatkal is open — AC opens at ${tatkalStatus?.acOpensAt ?? '10:00'}, Sleeper at ${tatkalStatus?.slOpensAt ?? '11:00'}`,
+      cls:  'bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300',
+    },
+    CHART_PENDING: {
+      text: '🕐 Chart preparation begins in under 4 hours — no new Tatkal bookings',
+      cls:  'bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-300',
+    },
+    CHART_PREPARED: {
+      text: `✅ Chart prepared — ${currAvlCount ?? 0} Current Availability (CURR_AVL) seat${currAvlCount !== 1 ? 's' : ''} open for instant CNF booking`,
+      cls:  'bg-teal-50 border-teal-300 text-teal-800 dark:bg-teal-900/20 dark:border-teal-700 dark:text-teal-300',
+    },
+    DEPARTED: {
+      text: '🚫 This train has already departed. No booking is possible.',
+      cls:  'bg-gray-100 border-gray-300 text-gray-600 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400',
+    },
+    BOOKING_UNAVAILABLE: {
+      text: '🚫 Booking is not open yet — journey date is beyond the 60-day ARP window.',
+      cls:  'bg-gray-100 border-gray-300 text-gray-600 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400',
+    },
+  };
+
+  const cfg = configs[trainPhase];
+  if (!cfg) return null;
+
+  return (
+    <div className={`px-4 py-2.5 text-sm font-medium border rounded-lg mb-5 ${cfg.cls}`}>
+      {cfg.text}
+    </div>
+  );
 }
 
 // ─── Days-of-week pills ───────────────────────────────────────────────────────
@@ -139,7 +191,20 @@ function TrainInfoPanel({ train, date }) {
 
 // ─── Class Selector ───────────────────────────────────────────────────────────
 
-function ClassSelectorCard({ fares, availability, selectedClass, onSelect, isTatkal, onTatkalToggle, onContinue }) {
+function ClassSelectorCard({ fares, availability, selectedClass, onSelect, isTatkal, onTatkalToggle, onContinue, trainPhase, tatkalStatus }) {
+  // Tatkal toggle is only shown when Tatkal is open for at least one class type.
+  const tatkalAvailable =
+    trainPhase === 'TATKAL_OPEN' ||
+    (trainPhase === 'ARP_OPEN' && false); // ARP: not yet
+
+  // Booking is blocked when departed or ARP not open or chart prepared (only CURR_AVL possible).
+  const bookingBlocked =
+    trainPhase === 'DEPARTED' ||
+    trainPhase === 'BOOKING_UNAVAILABLE';
+
+  // Show CURR_AVL booking type when chart is prepared.
+  const isCurrAvl = trainPhase === 'CHART_PREPARED';
+
   return (
     <div className="card p-5 lg:sticky lg:top-4">
       <p className="font-bold text-sm mb-4" style={{ color: 'var(--text-primary)' }}>Select Class</p>
@@ -147,7 +212,7 @@ function ClassSelectorCard({ fares, availability, selectedClass, onSelect, isTat
       <div className="flex flex-col gap-2 mb-5">
         {fares.map(fare => {
           const avail   = availability?.[fare.class_code];
-          const badge   = getAvailBadge(avail);
+          const badge   = getAvailBadge(avail, trainPhase);
           const price   = isTatkal && fare.tatkal_fare > 0 ? fare.tatkal_fare : fare.total_fare;
           const isChosen = selectedClass === fare.class_code;
 
@@ -186,34 +251,44 @@ function ClassSelectorCard({ fares, availability, selectedClass, onSelect, isTat
         })}
       </div>
 
-      {/* Tatkal toggle
-          Tatkal = premium emergency quota: higher fare, zero refund, opens 1 day before departure. */}
-      <label className="flex items-center gap-3 mb-4 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={isTatkal}
-          onChange={e => onTatkalToggle(e.target.checked)}
-          className="accent-amber-600 w-4 h-4"
-        />
-        <div>
-          <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Book Tatkal</p>
-          <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Higher fare · 0% refund</p>
-        </div>
-      </label>
+      {/* Tatkal toggle — only shown when Tatkal window is open */}
+      {tatkalAvailable && !isCurrAvl && (
+        <>
+          <label className="flex items-center gap-3 mb-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isTatkal}
+              onChange={e => onTatkalToggle(e.target.checked)}
+              className="accent-amber-600 w-4 h-4"
+            />
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Book Tatkal ⚡</p>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Higher fare · 0% refund · Instant CNF</p>
+            </div>
+          </label>
+          {isTatkal && (
+            <div className="mb-4 px-3 py-2 rounded-lg text-xs bg-amber-50 text-amber-800 border border-amber-200
+              dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800">
+              ⚠️ Tatkal tickets have <strong>no refund</strong> on cancellation and higher charges apply.
+            </div>
+          )}
+        </>
+      )}
 
-      {isTatkal && (
-        <div className="mb-4 px-3 py-2 rounded-lg text-xs bg-amber-50 text-amber-800 border border-amber-200
-          dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800">
-          ⚠️ Tatkal tickets have <strong>no refund</strong> on cancellation and higher charges apply.
+      {/* CURR_AVL notice */}
+      {isCurrAvl && (
+        <div className="mb-4 px-3 py-2 rounded-lg text-xs bg-teal-50 text-teal-800 border border-teal-200
+          dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-700">
+          ✅ Chart prepared. This is a <strong>Current Availability</strong> (CURR_AVL) booking — instantly confirmed.
         </div>
       )}
 
       <button
-        disabled={!selectedClass}
+        disabled={!selectedClass || bookingBlocked}
         onClick={onContinue}
         className="btn-primary w-full py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Continue to Booking →
+        {isCurrAvl ? 'Book CURR_AVL (Instant CNF) →' : 'Continue to Booking →'}
       </button>
     </div>
   );
@@ -253,9 +328,9 @@ export default function TrainDetailPage() {
   }, [trainNumber, from, to, date]);
 
   function handleContinue() {
-    // Use React Router location.state to pass booking details to the next page.
-    // This avoids long query strings for complex objects and is not bookmarkable —
-    // which is fine for a checkout flow where the user should re-search if they refresh.
+    const trainPhase = train.trainPhase ?? 'ARP_OPEN';
+    const isCurrAvl  = trainPhase === 'CHART_PREPARED';
+
     navigate('/passengers', {
       state: {
         trainNumber: train.trainNumber,
@@ -264,8 +339,9 @@ export default function TrainDetailPage() {
         toStation:   to,
         journeyDate: date,
         classCode:   selectedClass,
-        bookingType: isTatkal ? 'tatkal' : 'normal',
+        bookingType: isCurrAvl ? 'curr_avl' : (isTatkal ? 'tatkal' : 'normal'),
         fare:        train.fares?.find(f => f.class_code === selectedClass),
+        trainPhase,
       },
     });
   }
@@ -286,6 +362,13 @@ export default function TrainDetailPage() {
   return (
     <Layout>
       <TrainInfoPanel train={train} date={date} />
+
+      {/* Phase banner — reads from server response, never computed client-side */}
+      <PhaseAlert
+        trainPhase={train.trainPhase}
+        tatkalStatus={train.tatkalStatus}
+        currAvlCount={train.currAvlCount}
+      />
 
       {/* Two-column layout on desktop, stacked on mobile */}
       <div className="flex flex-col lg:flex-row gap-5">
@@ -311,6 +394,8 @@ export default function TrainDetailPage() {
               isTatkal={isTatkal}
               onTatkalToggle={setTatkal}
               onContinue={handleContinue}
+              trainPhase={train.trainPhase ?? 'ARP_OPEN'}
+              tatkalStatus={train.tatkalStatus ?? {}}
             />
           ) : (
             <div className="card p-5 text-center">

@@ -1,51 +1,113 @@
-import React, { useState, useEffect, useRef } from 'react';
+// =============================================================================
+// NammaRail — QuickServices (4-card quick links, full width)
+// =============================================================================
+
+import React, { useRef, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+const SERVICES = [
+  { emoji: '🎫', label: 'Book Ticket',     action: 'scroll' },
+  { emoji: '📋', label: 'PNR Status',      action: 'toast',  toast: 'PNR Status — coming soon' },
+  { emoji: '🚉', label: 'Train Schedule',  action: 'toast',  toast: 'Train Schedule — coming soon' },
+  { emoji: '❌', label: 'Cancel Ticket',   action: 'nav',    to: '/my-bookings' },
+];
+
 export default function QuickServices() {
-  const [showToast, setShowToast] = useState('');
   const navigate = useNavigate();
   const ref = useRef(null);
+  const [toast, setToast] = useState('');
+  const [hoveredIdx, setHoveredIdx] = useState(null);
 
+  // Fade in when scrolled into view
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) {
-        entry.target.classList.add('opacity-100');
+        entry.target.classList.add('qs-visible');
         observer.disconnect();
       }
-    });
+    }, { threshold: 0.1 });
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, []);
 
-  const handleToast = (msg) => {
-    setShowToast(msg);
-    setTimeout(() => setShowToast(''), 2000);
-  };
+  function handleClick(svc) {
+    if (svc.action === 'scroll') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (svc.action === 'toast') {
+      setToast(svc.toast);
+      setTimeout(() => setToast(''), 2500);
+    } else if (svc.action === 'nav') {
+      navigate(svc.to);
+    }
+  }
 
   return (
-    <div className="max-w-5xl mx-auto px-5 mt-8 mb-12">
-      <h2 className="text-[11px] uppercase tracking-widest text-gray-500 mb-4">Quick Services</h2>
-      <div ref={ref} className="grid grid-cols-2 md:grid-cols-4 gap-3 opacity-0 transition-opacity duration-500">
-        <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="card-hover border border-border rounded p-3 text-center transition-all duration-200 fade-up-1">
-          <div className="text-xl mb-1">🎫</div>
-          <div className="text-[13px] font-medium text-gray-800 dark:text-gray-200">Book Ticket</div>
-        </button>
-        <button onClick={() => handleToast('PNR Status Coming soon')} className="card-hover border border-border rounded p-3 text-center transition-all duration-200 fade-up-2 relative">
-          <div className="text-xl mb-1">📋</div>
-          <div className="text-[13px] font-medium text-gray-800 dark:text-gray-200">PNR Status</div>
-        </button>
-        <button onClick={() => handleToast('Train Schedule Coming soon')} className="card-hover border border-border rounded p-3 text-center transition-all duration-200 fade-up-3">
-          <div className="text-xl mb-1">🚉</div>
-          <div className="text-[13px] font-medium text-gray-800 dark:text-gray-200">Train Schedule</div>
-        </button>
-        <button onClick={() => navigate('/my-bookings')} className="card-hover border border-border rounded p-3 text-center transition-all duration-200 fade-up-4">
-          <div className="text-xl mb-1">❌</div>
-          <div className="text-[13px] font-medium text-gray-800 dark:text-gray-200">Cancel Ticket</div>
-        </button>
+    <div style={{ padding: '16px 24px 20px' }}>
+      <h2 style={{
+        fontSize: 11,
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+        color: '#888',
+        marginBottom: 12,
+        fontWeight: 600,
+      }}>
+        Quick Services
+      </h2>
+
+      {/* 4 cards — 1 row on desktop, 2×2 on mobile */}
+      <div ref={ref} className="qs-grid" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 10,
+        opacity: 0,
+        transition: 'opacity 0.5s ease',
+      }}>
+        {SERVICES.map((svc, i) => (
+          <button
+            key={svc.label}
+            onClick={() => handleClick(svc)}
+            onMouseEnter={() => setHoveredIdx(i)}
+            onMouseLeave={() => setHoveredIdx(null)}
+            style={{
+              border: `1px solid ${hoveredIdx === i ? '#1a3a5c' : '#e8e4d9'}`,
+              borderRadius: 4,
+              padding: '14px 10px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              background: hoveredIdx === i ? 'rgba(26,58,92,0.04)' : '#fff',
+              transition: 'all 0.2s',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 6,
+            }}
+            className="dark:bg-[#1e1c15] dark:border-[#302e22]"
+          >
+            <span style={{ fontSize: 22 }}>{svc.emoji}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18' }}
+              className="dark:text-gray-200">
+              {svc.label}
+            </span>
+          </button>
+        ))}
       </div>
-      {showToast && (
-        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-[#0f2744] text-white px-4 py-2 rounded shadow-lg text-sm z-50">
-          {showToast}
+
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#0f2744',
+          color: '#fff',
+          padding: '10px 20px',
+          borderRadius: 6,
+          fontSize: 13,
+          zIndex: 9999,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+        }}>
+          {toast}
         </div>
       )}
     </div>

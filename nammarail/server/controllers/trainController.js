@@ -11,6 +11,10 @@
 
 const db = require('../db/database');
 const { validateJourneyDate, getDayColumn, getDayName, isValidDateFormat, isDateInPast } = require('../utils/dateUtils');
+const { buildPhaseContext, getTrainPhase, getTatkalWindowStatus, PHASES } = require('../utils/phaseUtils');
+const { getChartStatus, getCurrAvlRemaining } = require('../utils/chartUtils');
+const { getBookingStatus, getNextWLNumber, getNextRACNumber } = require('../utils/seatUtils');
+const { materializeInventory } = require('../utils/worldEngine');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — Default seat capacities per class code.
@@ -71,24 +75,32 @@ function createInventoryIfMissing(trainId, journeyDate, classCode) {
         WHERE train_id = ? AND journey_date = ? AND class_code = ?
     `).get(trainId, journeyDate, classCode);
 
-    if (existing) return existing;
+    if (!existing) {
+        // Look up seat defaults for this class; fall back to generic defaults.
+        const defaults = SEAT_DEFAULTS[classCode] || DEFAULT_SEATS;
 
-    // Look up seat defaults for this class; fall back to generic defaults.
-    const defaults = SEAT_DEFAULTS[classCode] || DEFAULT_SEATS;
+        // Insert the new inventory row.
+        // The UNIQUE(train_id, journey_date, class_code) constraint in schema.sql
+        // prevents duplicates if two requests arrive simultaneously.
+        db.prepare(`
+            INSERT OR IGNORE INTO seat_inventory
+                (train_id, journey_date, class_code,
+                 total_seats, rac_total, tatkal_seats,
+                 wl_total)
+            VALUES (?, ?, ?, ?, ?, ?, 60)
+        `).run(trainId, journeyDate, classCode,
+               defaults.total_seats, defaults.rac_total, defaults.tatkal_seats);
+    }
 
-    // Insert the new inventory row.
-    // The UNIQUE(train_id, journey_date, class_code) constraint in schema.sql
-    // prevents duplicates if two requests arrive simultaneously.
-    db.prepare(`
-        INSERT OR IGNORE INTO seat_inventory
-            (train_id, journey_date, class_code,
-             total_seats, rac_total, tatkal_seats,
-             wl_total)
-        VALUES (?, ?, ?, ?, ?, ?, 60)
-    `).run(trainId, journeyDate, classCode,
-           defaults.total_seats, defaults.rac_total, defaults.tatkal_seats);
+    // Run the World Engine to catch up any simulated demand since last access.
+    // Must run after the row exists; reads sim_days_before_journey to know
+    // how many days to fast-forward.  The search request runs outside an explicit
+    // transaction, so we wrap just this call — better-sqlite3 transactions are
+    // safe to nest (inner becomes a no-op if already inside one).
+    const materialize = db.transaction(() => materializeInventory(trainId, journeyDate, classCode));
+    materialize();
 
-    // Fetch and return the freshly-inserted row.
+    // Fetch and return the freshly-updated row.
     return db.prepare(`
         SELECT * FROM seat_inventory
         WHERE train_id = ? AND journey_date = ? AND class_code = ?
@@ -107,24 +119,35 @@ function createInventoryIfMissing(trainId, journeyDate, classCode) {
  * @param {Object} inv - A row from seat_inventory
  * @returns {Object} Structured availability block
  */
-function buildAvailabilityShape(inv) {
-    return {
+function buildAvailabilityShape(inv, chartInfo) {
+    const shape = {
         CNF: {
-            available:  inv.total_seats - inv.confirmed_seats,
+            available:  Math.max(0, inv.total_seats - (inv.confirmed_seats || 0)),
             totalSeats: inv.total_seats,
         },
         RAC: {
-            available:    inv.rac_total - inv.rac_filled,
+            available:    Math.max(0, inv.rac_total - (inv.rac_filled || 0)),
             totalCapacity: inv.rac_total,
         },
         WL: {
-            current:    inv.wl_filled,
+            current:    inv.wl_filled || 0,
             maxAllowed: inv.wl_total,
         },
         tatkal: {
-            available: inv.tatkal_seats - inv.tatkal_filled,
+            available: Math.max(0, inv.tatkal_seats - (inv.tatkal_filled || 0)),
         },
     };
+
+    // CURR_AVL is only shown if chart is PREPARED.
+    if (chartInfo && chartInfo.chartStatus === 'PREPARED') {
+        const filled = inv.curr_avl_filled || 0;
+        shape.CURR_AVL = {
+            available: Math.max(0, (chartInfo.currAvlCount || 0) - filled),
+            total:     chartInfo.currAvlCount || 0,
+        };
+    }
+
+    return shape;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,7 +314,6 @@ function fetchSegmentFares(trainId, fromCode, toCode, originCode, destCode, clas
  */
 function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, dayName) {
     // Segment distance = distance of TO stop minus distance of FROM stop.
-    // This gives the actual km the passenger will travel, not the full route.
     const distanceKm = (row.to_distance || 0) - (row.from_distance || 0);
 
     // Segment duration from actual stop-level times, accounting for day_count
@@ -309,17 +331,27 @@ function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, d
     // Build availability for each fare class (lazy-create inventory)
     const availabilityByClass = {};
     for (const fare of fares) {
-        const inv = createInventoryIfMissing(row.id, journeyDate, fare.class_code);
-        availabilityByClass[fare.class_code] = buildAvailabilityShape(inv);
+        const inv       = createInventoryIfMissing(row.id, journeyDate, fare.class_code);
+        const chartInfo = getChartStatus(db, row.id, journeyDate, fare.class_code);
+        availabilityByClass[fare.class_code] = buildAvailabilityShape(inv, chartInfo);
     }
+
+    // Compute phase context using departure_time from the FROM stop (actual_departure)
+    // We use the train-level departure_time for phase since that's what determines
+    // chart prep timing (T-4h before the train's DEPARTURE from origin).
+    const chartRow    = getChartStatus(db, row.id, journeyDate, null);
+    const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+    const currAvlCount = chartRow?.currAvlCount ?? 0;
+    const phaseContext = buildPhaseContext(
+        journeyDate, row.departure_time || row.actual_departure,
+        chartStatus, currAvlCount
+    );
 
     return {
         trainNumber:    row.id,
         trainName:      row.name,
-        // fromStation / toStation = what the passenger searched, not the train's endpoints
         fromStation:    searchFrom,
         toStation:      searchTo,
-        // Segment-specific times from the stations table stops
         departureTime:  row.actual_departure,
         arrivalTime:    row.actual_arrival,
         durationMins,
@@ -328,6 +360,8 @@ function buildSegmentResult(row, searchFrom, searchTo, journeyDate, classCode, d
         fareApproximate,
         availability:   availabilityByClass,
         fares,
+        // Agent Constitution API Contract: every response must include phase context
+        ...phaseContext,
     };
 }
 
@@ -528,10 +562,19 @@ function getTrainDetails(req, res) {
     const availabilityByClass = {};
     for (const fare of fares) {
         if (journeyDate) {
-            const inv = createInventoryIfMissing(trainNumber, journeyDate, fare.class_code);
-            availabilityByClass[fare.class_code] = buildAvailabilityShape(inv);
+            const inv       = createInventoryIfMissing(trainNumber, journeyDate, fare.class_code);
+            const chartInfo = getChartStatus(db, trainNumber, journeyDate, fare.class_code);
+            availabilityByClass[fare.class_code] = buildAvailabilityShape(inv, chartInfo);
         }
     }
+
+    // Build phase context for this train/date.
+    const chartRow    = journeyDate ? getChartStatus(db, trainNumber, journeyDate, null) : null;
+    const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+    const currAvlCount = chartRow?.currAvlCount ?? 0;
+    const phaseContext = journeyDate
+        ? buildPhaseContext(journeyDate, train.departure_time, chartStatus, currAvlCount)
+        : null;
 
     return res.status(200).json({
         trainNumber: train.id,
@@ -546,6 +589,7 @@ function getTrainDetails(req, res) {
         stations,
         fares,
         ...(journeyDate ? { journeyDate, availability: availabilityByClass } : {}),
+        ...(phaseContext || {}),
     });
 }
 
@@ -657,4 +701,216 @@ function getStats(req, res) {
     }
 }
 
-module.exports = { searchTrains, getTrainDetails, searchStations, getStats };
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCTION: getAvailabilityGrid — GET /api/trains/:trainId/availability
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getAvailabilityGrid(req, res) {
+    const trainId = parseInt(req.params.trainId, 10);
+    const { classCode, startDate, numDays, quota, from, to } = req.query;
+
+    if (isNaN(trainId) || !classCode || !startDate) {
+        return res.status(400).json({ error: 'trainId, classCode, and startDate are required' });
+    }
+
+    const days = parseInt(numDays, 10) || 6;
+    const train = db.prepare('SELECT * FROM trains WHERE id = ?').get(trainId);
+
+    if (!train) {
+        return res.status(404).json({ error: 'Train not found' });
+    }
+
+    const fromCode = (from || train.from_station_code).toUpperCase();
+    const toCode   = (to   || train.to_station_code).toUpperCase();
+
+    const fareRecords = fetchFareForClass(trainId, fromCode, toCode, classCode);
+    const fareObj = Array.isArray(fareRecords) ? fareRecords[0] : fareRecords;
+    const baseFare = fareObj ? (fareObj.total_fare || 0) : 0;
+    const tatkalExtra = fareObj ? (fareObj.tatkal_fare || 0) : 0;
+
+    const result = [];
+    const start = new Date(startDate);
+
+    for (let i = 0; i < days; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        // Ensure local string matches YYYY-MM-DD correctly without tz shifts
+        const isoDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+        const label = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+
+        const inv = createInventoryIfMissing(trainId, isoDate, classCode);
+        const chartRow = getChartStatus(db, trainId, isoDate, classCode);
+        const chartStatus = chartRow?.chartStatus ?? 'PENDING';
+        
+        // We need departure time at the searched fromCode if available, otherwise train origin departure
+        const stopRow = db.prepare('SELECT departure_time FROM stations WHERE train_id = ? AND station_code = ?').get(trainId, fromCode);
+        const departureTime = stopRow?.departure_time && stopRow.departure_time !== '--' ? stopRow.departure_time : train.departure_time;
+
+        const phase = getTrainPhase(isoDate, departureTime, chartStatus);
+        
+        const isTatkal = quota === 'tatkal';
+        const totalFare = baseFare + (isTatkal ? tatkalExtra : 0);
+
+        let status = 'AVAILABLE';
+        let count = 0;
+        let isBookable = false;
+        let extraProps = {};
+
+        if (phase === PHASES.DEPARTED) {
+            status = 'REGRET';
+            isBookable = false;
+        } else if (phase === PHASES.BOOKING_UNAVAILABLE) {
+            status = 'NOT_YET';
+            isBookable = false;
+        } else if (phase === PHASES.CHART_PREPARED) {
+            status = 'CHART_PREPARED';
+            count = getCurrAvlRemaining(db, trainId, isoDate, classCode);
+            if (count > 0 && !isTatkal) {
+                // CURR_AVL available
+                status = 'AVAILABLE';
+                isBookable = true;
+            } else {
+                isBookable = false;
+            }
+        } else if (isTatkal) {
+            const tatkalStatusObj = getTatkalWindowStatus(classCode, isoDate);
+            if (!tatkalStatusObj.isOpen) {
+                status = 'TATKAL_NOT_YET';
+                isBookable = false;
+                extraProps = {
+                    opensAt: tatkalStatusObj.opensAt,
+                    opensOnDate: tatkalStatusObj.opensOnDate,
+                    minsUntilOpen: tatkalStatusObj.minsUntilOpen,
+                    opensInDays: tatkalStatusObj.opensInDays,
+                };
+            } else {
+                const tatkalAvailable = Math.max(0, inv.tatkal_seats - inv.tatkal_filled);
+                if (tatkalAvailable > 0) {
+                    status = 'AVAILABLE';
+                    count = tatkalAvailable;
+                    isBookable = true;
+                } else {
+                    status = 'REGRET';
+                    isBookable = false;
+                }
+            }
+        } else {
+            // Normal booking
+            const bkStatus = getBookingStatus(inv);
+            if (bkStatus === 'CNF') {
+                status = 'AVAILABLE';
+                count = Math.max(0, (inv.total_seats - inv.tatkal_seats) - inv.confirmed_seats);
+                isBookable = true;
+            } else if (bkStatus === 'RAC') {
+                status = 'RAC';
+                count = getNextRACNumber(inv);
+                isBookable = true;
+            } else if (bkStatus === 'WL') {
+                status = 'WL';
+                count = getNextWLNumber(inv);
+                isBookable = true;
+            } else {
+                status = 'REGRET';
+                isBookable = false;
+            }
+        }
+
+        result.push({
+            date: isoDate,
+            label,
+            status,
+            count,
+            fare: totalFare,
+            isBookable,
+            ...extraProps
+        });
+    }
+
+    return res.status(200).json(result);
+}
+
+// =============================================================================
+// FUNCTION: adminAddTrain — POST /api/trains/admin
+// =============================================================================
+// Inserts a new train record and immediately kicks off async demand enrichment.
+// Protected by authenticateToken middleware in trainRoutes.js.
+//
+// WHY FIRE-AND-FORGET?
+// ────────────────────
+// The Gemini enrichment call can take 1–3 seconds (network round-trip).
+// Blocking the HTTP response until it completes would give the admin a poor UX
+// and ties up the Express worker thread unnecessarily.
+// Instead we respond immediately with the inserted train row, then asynchronously
+// update demand_tier in the background via setImmediate.
+// =============================================================================
+
+const { enrichTrainDemandTier } = require('../utils/demandEnrichment');
+
+function adminAddTrain(req, res) {
+    const {
+        id, name, from_station_code, to_station_code,
+        departure_time, arrival_time, duration_mins, distance_km,
+        runs_mon = 0, runs_tue = 0, runs_wed = 0, runs_thu = 0,
+        runs_fri = 0, runs_sat = 0, runs_sun = 0,
+    } = req.body;
+
+    // Basic validation.
+    if (!id || !name || !from_station_code || !to_station_code) {
+        return res.status(400).json({ error: 'id, name, from_station_code, to_station_code are required' });
+    }
+    if (isNaN(parseInt(id, 10))) {
+        return res.status(400).json({ error: 'id must be a numeric train number' });
+    }
+
+    const trainId = parseInt(id, 10);
+
+    // Check for duplicates.
+    const existing = db.prepare('SELECT id FROM trains WHERE id = ?').get(trainId);
+    if (existing) {
+        return res.status(409).json({ error: `Train ${trainId} already exists` });
+    }
+
+    // Insert the new train.
+    db.prepare(`
+        INSERT INTO trains
+            (id, name, from_station_code, to_station_code,
+             runs_mon, runs_tue, runs_wed, runs_thu, runs_fri, runs_sat, runs_sun,
+             departure_time, arrival_time, duration_mins, distance_km)
+        VALUES
+            (?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?)
+    `).run(
+        trainId, name.trim(), from_station_code.trim().toUpperCase(), to_station_code.trim().toUpperCase(),
+        runs_mon ? 1 : 0, runs_tue ? 1 : 0, runs_wed ? 1 : 0,
+        runs_thu ? 1 : 0, runs_fri ? 1 : 0, runs_sat ? 1 : 0, runs_sun ? 1 : 0,
+        departure_time || null, arrival_time || null,
+        duration_mins  ? parseInt(duration_mins, 10)  : null,
+        distance_km    ? parseInt(distance_km, 10)    : null
+    );
+
+    const inserted = db.prepare('SELECT * FROM trains WHERE id = ?').get(trainId);
+
+    // Respond immediately — demand enrichment happens in the background.
+    res.status(201).json({
+        message:       'Train added successfully. Demand enrichment is running in the background.',
+        train:         inserted,
+        demandTierNote: 'demand_tier will be set asynchronously by Gemini. Check GET /api/trains/:id for the updated value.',
+    });
+
+    // Fire-and-forget: enrich demand tier without blocking the response.
+    setImmediate(async () => {
+        try {
+            const tier = await enrichTrainDemandTier(inserted);
+            if (tier) {
+                console.log(`  ✔  Admin train ${trainId} (${name}) demand_tier classified as: ${tier}`);
+            } else {
+                console.log(`  ⚠  Admin train ${trainId} (${name}) enrichment skipped/failed — demand_tier stays NULL`);
+            }
+        } catch (err) {
+            console.error(`  ✘  Admin train enrichment exception for ${trainId}:`, err.message);
+        }
+    });
+}
+
+module.exports = { searchTrains, getTrainDetails, searchStations, getStats, getAvailabilityGrid, adminAddTrain };
