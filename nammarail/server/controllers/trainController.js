@@ -261,37 +261,107 @@ function calcSegmentDuration(fromTime, fromDay, toTime, toDay) {
 /**
  * Fetches fares for a searched segment (fromCode → toCode).
  *
- * WHY A FALLBACK?
+ * FALLBACK CHAIN (three levels):
  * ─────────────────────────────────────────────────────────────────────────────
- * The fares table stores fare rows for common origin→destination pairs.
- * For an intermediate segment like TBM→RJPM, an exact fare row may not exist
- * in the dataset. In that case we fall back to the full-route fare and mark
- * it approximate — better than showing nothing to the user.
+ * 1. Exact match   — this train, this segment (fromCode → toCode)
+ * 2. Route match   — this train, full origin → dest route
+ * 3. Cross-train   — ANY other train with fares for the same searched segment
+ *                    (fromCode → toCode).  If none, any train for that class.
  *
- * The fare and duration shown must reflect the SEARCHED SEGMENT (TBM→RJPM),
- * not the full train journey (MAS→NCJ). This is what real IRCTC does — it
- * shows you the fare and time for your specific boarding-to-alighting segment.
+ * Levels 2 and 3 are marked fareApproximate=true so the UI can show a "~"
+ * prefix to inform the user the fare is an estimate.
  *
  * @param {number} trainId
- * @param {string} fromCode  - Searched FROM station
- * @param {string} toCode    - Searched TO station
- * @param {string} originCode  - Train's actual origin
- * @param {string} destCode    - Train's actual destination
+ * @param {string} fromCode   - Searched FROM station
+ * @param {string} toCode     - Searched TO station
+ * @param {string} originCode - Train's actual origin
+ * @param {string} destCode   - Train's actual destination
  * @param {string|null} classCode
  * @returns {{ fares: Object[], fareApproximate: boolean }}
  */
 function fetchSegmentFares(trainId, fromCode, toCode, originCode, destCode, classCode) {
-    // Try exact segment fare first (the happy path)
+    // ── Level 1: exact segment fare for this train ────────────────────────
     const exact = fetchFareForClass(trainId, fromCode, toCode, classCode);
     const exactArr = Array.isArray(exact) ? exact : (exact ? [exact] : []);
     if (exactArr.length > 0) {
         return { fares: exactArr, fareApproximate: false };
     }
 
-    // Fallback: use the full-route fare for this train
-    const fallback = fetchFareForClass(trainId, originCode, destCode, classCode);
-    const fallbackArr = Array.isArray(fallback) ? fallback : (fallback ? [fallback] : []);
-    return { fares: fallbackArr, fareApproximate: fallbackArr.length > 0 };
+    // ── Level 2: full-route fare for this train ────────────────────────────
+    const routeFallback = fetchFareForClass(trainId, originCode, destCode, classCode);
+    const routeArr = Array.isArray(routeFallback) ? routeFallback : (routeFallback ? [routeFallback] : []);
+    if (routeArr.length > 0) {
+        return { fares: routeArr, fareApproximate: true };
+    }
+
+    // ── Level 3: cross-train fallback ─────────────────────────────────────
+    // This train has NO fares at all.  Borrow fares from another train that
+    // serves the same searched segment (fromCode → toCode), filtered by class
+    // if requested.  We exclude the current train to avoid circular results.
+    //
+    // Strategy:
+    //   a) Try exact same searched segment (fromCode → toCode) on other trains.
+    //   b) If still nothing, fall back to any fare row for the requested class
+    //      so we always have something to show.
+    const crossTrainQuery = classCode
+        ? db.prepare(`
+            SELECT base_fare, total_fare, class_code, tatkal_fare,
+                   reservation_charge, superfast_charge, service_tax,
+                   distance_km, duration_mins
+            FROM   fares
+            WHERE  from_station_code = ?
+              AND  to_station_code   = ?
+              AND  class_code        = ?
+              AND  train_id         != ?
+            LIMIT 1
+          `).get(fromCode, toCode, classCode, trainId)
+        : db.prepare(`
+            SELECT base_fare, total_fare, class_code, tatkal_fare,
+                   reservation_charge, superfast_charge, service_tax,
+                   distance_km, duration_mins
+            FROM   fares
+            WHERE  from_station_code = ?
+              AND  to_station_code   = ?
+              AND  train_id         != ?
+            ORDER BY class_code
+          `).all(fromCode, toCode, trainId);
+
+    const crossArr = Array.isArray(crossTrainQuery)
+        ? crossTrainQuery
+        : (crossTrainQuery ? [crossTrainQuery] : []);
+
+    if (crossArr.length > 0) {
+        return { fares: crossArr, fareApproximate: true };
+    }
+
+    // ── Level 3b: class-level fallback for any route ───────────────────────
+    // If no train has fares for this specific segment, grab fares for the
+    // requested class on any route so the card still renders with class tabs.
+    const anyFares = classCode
+        ? db.prepare(`
+            SELECT base_fare, total_fare, class_code, tatkal_fare,
+                   reservation_charge, superfast_charge, service_tax,
+                   distance_km, duration_mins
+            FROM   fares
+            WHERE  class_code = ?
+              AND  train_id  != ?
+            LIMIT 1
+          `).get(classCode, trainId)
+        : db.prepare(`
+            SELECT base_fare, total_fare, class_code, tatkal_fare,
+                   reservation_charge, superfast_charge, service_tax,
+                   distance_km, duration_mins
+            FROM   fares
+            WHERE  train_id != ?
+            GROUP BY class_code
+            ORDER BY class_code
+          `).all(trainId);
+
+    const anyArr = Array.isArray(anyFares)
+        ? anyFares
+        : (anyFares ? [anyFares] : []);
+
+    return { fares: anyArr, fareApproximate: anyArr.length > 0 };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -724,8 +794,28 @@ function getAvailabilityGrid(req, res) {
     const toCode   = (to   || train.to_station_code).toUpperCase();
 
     const fareRecords = fetchFareForClass(trainId, fromCode, toCode, classCode);
-    const fareObj = Array.isArray(fareRecords) ? fareRecords[0] : fareRecords;
-    const baseFare = fareObj ? (fareObj.total_fare || 0) : 0;
+    let fareObj = Array.isArray(fareRecords) ? fareRecords[0] : fareRecords;
+    // Base fare is date-invariant — only Tatkal premium varies by quota.
+    // Fallback chain: same train any route → cross-train same segment → cross-train any route.
+    if (!fareObj) {
+        // Level 2: same train, any route
+        fareObj = db.prepare(
+            'SELECT total_fare, tatkal_fare FROM fares WHERE train_id = ? AND class_code = ? LIMIT 1'
+        ).get(trainId, classCode);
+    }
+    if (!fareObj) {
+        // Level 3a: another train, same searched segment
+        fareObj = db.prepare(
+            'SELECT total_fare, tatkal_fare FROM fares WHERE from_station_code = ? AND to_station_code = ? AND class_code = ? AND train_id != ? LIMIT 1'
+        ).get(fromCode, toCode, classCode, trainId);
+    }
+    if (!fareObj) {
+        // Level 3b: another train, any route, same class
+        fareObj = db.prepare(
+            'SELECT total_fare, tatkal_fare FROM fares WHERE class_code = ? AND train_id != ? LIMIT 1'
+        ).get(classCode, trainId);
+    }
+    const baseFare    = fareObj ? (fareObj.total_fare  || 0) : 0;
     const tatkalExtra = fareObj ? (fareObj.tatkal_fare || 0) : 0;
 
     const result = [];

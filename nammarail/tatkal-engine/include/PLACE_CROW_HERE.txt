@@ -1,0 +1,9 @@
+# Place crow_all.h here.
+#
+# Download command (run from the tatkal-engine/ directory):
+#
+#   curl -L https://github.com/CrowCpp/Crow/releases/download/v1.2.0/crow_all.h \
+#        -o include/crow_all.h
+#
+# crow_all.h is the official single-file amalgamation of the Crow C++ framework.
+# It is ~4 MB and header-only — no separate compilation step needed.
