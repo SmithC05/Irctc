@@ -575,18 +575,28 @@ function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, quota = 
           </span>
         )}
 
-        {/* Book Now — flat brass button */}
-        <button
-          onClick={() => onBook(selectedItem?.date ?? searchDate)}
-          disabled={bookNowDisabled}
-          className="tk-book-btn"
-          style={{ cursor: bookNowDisabled ? 'not-allowed' : 'pointer' }}
-          onMouseEnter={e => { if (!bookNowDisabled) e.currentTarget.style.filter = 'brightness(0.92)'; }}
-          onMouseLeave={e => { e.currentTarget.style.filter = ''; }}
-          aria-disabled={bookNowDisabled}
-        >
-          Book Now →
-        </button>
+        {/* Book Now / Tatkal Race button */}
+        {quota === 'tatkal' ? (
+          <button
+            onClick={() => navigate(`/tatkal/${train.trainNumber}_${selectedItem?.date ?? searchDate}`)}
+            className="tk-book-btn"
+            style={{ cursor: 'pointer', background: 'var(--tk-signal-red)', color: 'white', borderColor: 'transparent' }}
+          >
+            Tatkal Race ⚡
+          </button>
+        ) : (
+          <button
+            onClick={() => onBook(selectedItem?.date ?? searchDate)}
+            disabled={bookNowDisabled}
+            className="tk-book-btn"
+            style={{ cursor: bookNowDisabled ? 'not-allowed' : 'pointer' }}
+            onMouseEnter={e => { if (!bookNowDisabled) e.currentTarget.style.filter = 'brightness(0.92)'; }}
+            onMouseLeave={e => { e.currentTarget.style.filter = ''; }}
+            aria-disabled={bookNowDisabled}
+          >
+            Book Now →
+          </button>
+        )}
       </div>
     </div>
   );

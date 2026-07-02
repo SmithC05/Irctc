@@ -19,6 +19,8 @@ const trainRoutes   = require("./routes/trainRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const stationRoutes = require("./routes/stationRoutes");
 const chartRoutes   = require("./routes/chartRoutes");
+const tatkalRoutes  = require("./routes/tatkalRoutes");
+const aiRoutes      = require("./routes/aiRoutes");
 const { startChartScheduler } = require("./schedulers/chartScheduler");
 
 // ─────────────────────────────────────────────
@@ -132,6 +134,21 @@ app.use('/api/stations', stationRoutes);
 // ─────────────────────────────────────────────
 app.use('/api/trains', chartRoutes);
 app.use('/api',        chartRoutes);   // for /api/admin/chart/prepare
+
+// ─────────────────────────────────────────────
+// Mount the tatkal router.
+// Provides a bridge to the C++ Tatkal Engine.
+//   POST /api/tatkal/room/create
+//   GET  /api/tatkal/room/:room_id/ping
+// ─────────────────────────────────────────────
+app.use('/api/tatkal', tatkalRoutes);
+
+// ─────────────────────────────────────────────
+// Mount the AI router.
+// Provides streaming assistance via Gemini.
+//   POST /api/ai/assist
+// ─────────────────────────────────────────────
+app.use('/api/ai', aiRoutes);
 
 // ─────────────────────────────────────────────
 // 404 handler — catches any route that doesn't match above

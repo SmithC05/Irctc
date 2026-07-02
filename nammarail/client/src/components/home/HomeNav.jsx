@@ -149,6 +149,15 @@ export default function HomeNav() {
               <span style={{ color: '#fff', fontSize: 12 }}>
                 Hi, {user.name.split(' ')[0]}
               </span>
+              <Link to="/trains" style={{ color: '#fff', fontSize: 12, textDecoration: 'none' }}>
+                Find Trains
+              </Link>
+              <Link to="/pnr-status" style={{ color: '#fff', fontSize: 12, textDecoration: 'none' }}>
+                PNR Status
+              </Link>
+              <Link to="/chart" style={{ color: '#fff', fontSize: 12, textDecoration: 'none' }}>
+                Charts
+              </Link>
               <Link to="/my-bookings" style={{
                 color: '#fff', fontSize: 12, textDecoration: 'none',
               }}

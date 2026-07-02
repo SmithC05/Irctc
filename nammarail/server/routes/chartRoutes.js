@@ -85,4 +85,58 @@ router.post('/admin/chart/prepare', authenticateToken, (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/chart/:trainNumber/:date
+// Fetch all passengers for a given train and date.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/chart/:trainNumber/:date', (req, res) => {
+    const trainId = parseInt(req.params.trainNumber, 10);
+    const date = req.params.date;
+
+    const bookings = db.prepare(`
+        SELECT pnr_number, passenger_name, passenger_age, passenger_gender, status, seat_number, booking_type
+        FROM bookings
+        WHERE train_id = ? AND journey_date = ?
+        ORDER BY seat_number ASC
+    `).all(trainId, date);
+
+    return res.status(200).json({ chart: bookings });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/pnr/:pnrNumber
+// Fetch a booking by PNR number.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/pnr/:pnrNumber', (req, res) => {
+    const pnr = req.params.pnrNumber;
+    
+    const bookings = db.prepare(`
+        SELECT *
+        FROM bookings
+        WHERE pnr_number = ?
+    `).all(pnr);
+
+    if (bookings.length === 0) {
+        return res.status(404).json({ error: 'PNR not found' });
+    }
+
+    return res.status(200).json({
+        pnrNumber: pnr,
+        trainId: bookings[0].train_id,
+        journeyDate: bookings[0].journey_date,
+        fromStation: bookings[0].from_station_code,
+        toStation: bookings[0].to_station_code,
+        classCode: bookings[0].class_code,
+        passengers: bookings.map(b => ({
+            name: b.passenger_name,
+            age: b.passenger_age,
+            gender: b.passenger_gender,
+            status: b.status,
+            seatNumber: b.seat_number,
+            bookingType: b.booking_type,
+            fare: b.total_fare
+        }))
+    });
+});
+
 module.exports = router;
