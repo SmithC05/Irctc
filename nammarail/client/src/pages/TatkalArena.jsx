@@ -26,10 +26,14 @@ export default function TatkalArena() {
 
   useEffect(() => {
     // We assume the C++ engine runs on port 18080 locally based on main.cpp
-    const socket = new WebSocket(`ws://localhost:18080/ws/arena/${roomId}`);
+    const socket = new WebSocket(`ws://localhost:18080/ws/arena`);
     
     socket.onopen = () => {
       setStatus('connected');
+      socket.send(JSON.stringify({
+        action: 'JOIN',
+        room_id: roomId
+      }));
     };
     
     socket.onmessage = (event) => {

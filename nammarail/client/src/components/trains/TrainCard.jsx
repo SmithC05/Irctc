@@ -16,7 +16,7 @@
 // Token changes: all --sr-* colors → --tk-* from the ticket design system.
 // =============================================================================
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Zap, Clock, CheckCircle } from 'lucide-react';
 import { getAvailabilityGrid } from '../../api/trainApi';
@@ -184,9 +184,14 @@ function TatkalTimer({ minsUntilOpen, opensInDays, opensOnDate, opensAt, onCompl
 
   const [timeLeft, setTimeLeft] = useState(minsUntilOpen * 60);
   useEffect(() => {
+    let tick = 0;
     const interval = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 1) { clearInterval(interval); onComplete(); return 0; }
+        if (prev <= 1) {
+          if (tick % 2 === 0) onComplete(true);
+          tick++;
+          return 0;
+        }
         return prev - 1;
       });
     }, 1000);
@@ -330,9 +335,11 @@ function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, quota = 
   // dataLoaded gates the flip animation — set true on first fetch resolve, never reset on click
   const [dataLoaded,   setDataLoaded]  = useState(false);
 
-  async function fetchAvailability() {
-    setLoading(true);
-    setDataLoaded(false);
+  const fetchAvailability = useCallback(async (isPolling = false) => {
+    if (!isPolling) {
+      setLoading(true);
+      setDataLoaded(false);
+    }
     try {
       const response = await getAvailabilityGrid(
         train.trainNumber,
@@ -344,15 +351,19 @@ function AvailabilityGrid({ searchDate, train, activeClass, trainPhase, quota = 
         train.toStation
       );
       setData(response.data || []);
-      requestAnimationFrame(() => setDataLoaded(true));
+      if (!isPolling) {
+        requestAnimationFrame(() => setDataLoaded(true));
+      }
     } catch (err) {
       console.error(err);
-      setData([]);
-      setDataLoaded(true);
+      if (!isPolling) {
+        setData([]);
+        setDataLoaded(true);
+      }
     } finally {
-      setLoading(false);
+      if (!isPolling) setLoading(false);
     }
-  }
+  }, [train.trainNumber, activeClass, searchDate, quota, train.fromStation, train.toStation]);
 
   useEffect(() => {
     fetchAvailability();

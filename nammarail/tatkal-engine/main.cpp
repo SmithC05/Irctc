@@ -233,190 +233,97 @@ int main()
         return crow::response{201, res};
     });
 
+    
     // ═════════════════════════════════════════════════════════════════════════
-    // WebSocket  /ws/arena/<room_id>
-    //
-    // This is the hot path — every simultaneous "Pay" click arrives here.
-    //
-    // Protocol (client → server):
-    //   "BOOK_TICKET"    — attempt to claim one seat
-    //
-    // Protocol (server → client):
-    //   {"event":"ROOM_JOINED",   "room_id":"…", "available_tickets":N}
-    //   {"status":"CONFIRMED",    "seat":N}
-    //   {"status":"SOLD_OUT"}
-    //   {"event":"TICKET_BOOKED", "available_tickets":N}  ← broadcast to others
-    //   {"error":"Room not found","code":404}
+    // WebSocket  /ws/arena
     // ═════════════════════════════════════════════════════════════════════════
-    CROW_WEBSOCKET_ROUTE(app, "/ws/arena/<string>")
-
-    // ── ON OPEN ───────────────────────────────────────────────────────────────
-    // Crow passes the URL parameter ("room_id") as the second argument.
-    // Called once per new WebSocket upgrade — from a Crow IO thread.
-    .onopen([](crow::websocket::connection& conn, const std::string& room_id) {
-
-        // ── Step 1: Locate the room (shared / read lock) ──────────────────────
-        // shared_lock: multiple connections can open simultaneously without
-        // serialising each other — they all share the read lock.
-        TatkalRoom* room = nullptr;
-        {
-            std::shared_lock<std::shared_mutex> rlock(g_rooms_mutex);
-            auto it = g_rooms.find(room_id);
-            if (it != g_rooms.end()) {
-                room = it->second.get();   // raw pointer; lifetime tied to g_rooms
-            }
-        }   // shared_lock released here
-
+    CROW_WEBSOCKET_ROUTE(app, "/ws/arena")
+    .onopen([](crow::websocket::connection& conn) {
+        // We do nothing on open, wait for JOIN message
+    })
+    .onmessage([](crow::websocket::connection& conn, const std::string& msg, bool is_binary) {
+        auto* room = static_cast<TatkalRoom*>(conn.userdata());
+        
         if (!room) {
-            conn.send_text(R"({"error":"Room not found","code":404})");
-            conn.close("room_not_found");
+            try {
+                auto data = crow::json::load(msg);
+                if (data && data.has("action") && data["action"] == "JOIN") {
+                    std::string room_id = data["room_id"].s();
+                    
+                    std::shared_lock<std::shared_mutex> rlock(g_rooms_mutex);
+                    auto it = g_rooms.find(room_id);
+                    if (it != g_rooms.end()) {
+                        room = it->second.get();
+                        conn.userdata(room);
+                        
+                        {
+                            std::lock_guard<std::mutex> lk(room->conn_mutex);
+                            room->connections.insert(&conn);
+                        }
+                        
+                        crow::json::wvalue res;
+                        res["type"] = "ROOM_JOINED";
+                        res["available_tickets"] = room->available_tickets.load();
+                        conn.send_text(res.dump());
+                    } else {
+                        crow::json::wvalue err;
+                        err["type"] = "ERROR";
+                        err["message"] = "Room not found";
+                        conn.send_text(err.dump());
+                        conn.close();
+                    }
+                }
+            } catch (...) {}
             return;
         }
 
-        // ── Step 2: Register in the broadcast pool ────────────────────────────
-        {
-            std::lock_guard<std::mutex> lk(room->conn_mutex);
-            room->connections.insert(&conn);
-        }
+        try {
+            auto data = crow::json::load(msg);
+            if (data && data.has("action") && data["action"] == "BOOK_TICKET") {
+                const int seat_acquired = room->available_tickets.fetch_sub(1, std::memory_order_acq_rel);
 
-        // ── Step 3: Cache room pointer in connection's userdata slot ───────────
-        // Avoids a second g_rooms lookup on every message/close.
-        // conn.userdata<T>() is O(1) — it's just a void* stored on the connection.
-        conn.userdata(room);
+                if (seat_acquired > 0) {
+                    std::string user_id = data.has("user_id") ? std::string(data["user_id"].s()) : "unknown";
+                    crow::json::wvalue confirm;
+                    confirm["type"] = "CONFIRMED";
+                    confirm["seat"]   = seat_acquired;
+                    confirm["user_id"] = user_id;
+                    conn.send_text(confirm.dump());
 
-        // ── Step 4: Greet the new participant with current inventory ───────────
-        const int current = room->available_tickets.load(std::memory_order_acquire);
-        crow::json::wvalue hello;
-        hello["event"]             = "ROOM_JOINED";
-        hello["room_id"]           = room_id;
-        hello["available_tickets"] = current;
-        conn.send_text(hello.dump());
+                    const int remaining = room->available_tickets.load(std::memory_order_acquire);
 
-        CROW_LOG_INFO << "[JOIN]  room=" << room_id
-                      << " tickets_remaining=" << current;
+                    crow::json::wvalue bcast;
+                    bcast["type"]             = "TICKET_BOOKED";
+                    bcast["remaining"] = (remaining < 0 ? 0 : remaining);
+                    bcast["user_id"] = user_id;
+                    broadcast_to_room(*room, bcast.dump(), &conn);
+
+                    CROW_LOG_INFO << "[BOOK]  seat=" << seat_acquired << " remaining=" << remaining;
+
+                } else {
+                    room->available_tickets.fetch_add(1, std::memory_order_relaxed);
+
+                    crow::json::wvalue sold_out;
+                    sold_out["type"] = "SOLD_OUT";
+                    conn.send_text(sold_out.dump());
+
+                    CROW_LOG_INFO << "[SOLD_OUT] connection attempted booking, no seats left";
+                }
+            }
+        } catch (...) {}
     })
-
-    // ── ON MESSAGE ────────────────────────────────────────────────────────────
-    // Called for every text frame the client sends — from a Crow IO thread.
-    // For a 200-user race this may be called from 200 threads simultaneously.
-    // The ONLY shared state touched is available_tickets (via atomic fetch_sub).
-    .onmessage([](crow::websocket::connection& conn,
-                  const std::string&           msg,
-                  bool                         /*is_binary*/)
-    {
-        // Only act on the canonical booking command; silently ignore everything else.
-        // This makes the protocol extensible without breaking the engine.
-        if (msg != "BOOK_TICKET") return;
-
-        // Retrieve the room pointer cached in onopen (zero global lock).
-        auto* room = conn.userdata<TatkalRoom>();
-        if (!room) return;   // Defensive; should never be null after a successful open.
-
-        // ═════════════════════════════════════════════════════════════════════
-        // THE ATOMIC BOOKING — the core of the race engine
-        // ═════════════════════════════════════════════════════════════════════
-        //
-        // fetch_sub(1, acq_rel) performs:
-        //   1. LOAD the current counter value
-        //   2. DECREMENT it by 1
-        //   3. STORE the result back
-        //   4. RETURN the value that existed BEFORE the decrement
-        //
-        // Steps 1-3 happen atomically (LOCK XADD on x86-64) — indivisible.
-        // No other thread can observe or modify the counter between load and store.
-        //
-        // Memory order explanation:
-        //   memory_order_acquire (on the load) →
-        //     we see all prior writes from other threads (their bookings)
-        //   memory_order_release (on the store) →
-        //     our decrement is immediately visible to all subsequent threads
-        //   Combined: memory_order_acq_rel
-        //
-        // Seat numbering example with 3 seats, 4 simultaneous calls:
-        //   Thread A: fetch_sub(1) → returns 3, stores 2  → seat 3, CONFIRMED ✓
-        //   Thread B: fetch_sub(1) → returns 2, stores 1  → seat 2, CONFIRMED ✓
-        //   Thread C: fetch_sub(1) → returns 1, stores 0  → seat 1, CONFIRMED ✓  (last!)
-        //   Thread D: fetch_sub(1) → returns 0, stores -1 → SOLD_OUT, undo fetch_add
-        //
-        const int seat_acquired =
-            room->available_tickets.fetch_sub(1, std::memory_order_acq_rel);
-
-        if (seat_acquired > 0) {
-            // ── CONFIRMED ────────────────────────────────────────────────────
-            // This thread legally claimed seat `seat_acquired`.
-            // Send the personalised confirmation to the buyer.
-            crow::json::wvalue confirm;
-            confirm["status"] = "CONFIRMED";
-            confirm["seat"]   = seat_acquired;
-            conn.send_text(confirm.dump());
-
-            // Load the remaining count AFTER our decrement.
-            // Sequentially consistent load ensures we see all concurrent decrements
-            // that completed before our load (i.e., we never report a stale high count).
-            const int remaining =
-                room->available_tickets.load(std::memory_order_acquire);
-
-            // Broadcast the updated count to every OTHER connection in the room.
-            // We skip the buyer (&conn) — they already received CONFIRMED.
-            crow::json::wvalue bcast;
-            bcast["event"]             = "TICKET_BOOKED";
-            bcast["available_tickets"] = (remaining < 0 ? 0 : remaining);
-            broadcast_to_room(*room, bcast.dump(), &conn);
-
-            CROW_LOG_INFO << "[BOOK]  seat=" << seat_acquired
-                          << " remaining=" << remaining;
-
-        } else {
-            // ── SOLD OUT ─────────────────────────────────────────────────────
-            // seat_acquired == 0 means the counter was 0 when we called fetch_sub.
-            // seat_acquired  < 0 means it was already negative (multiple losers).
-            //
-            // Undo the decrement to prevent unbounded negative drift.
-            // Each "loser" thread subtracts 1 and then immediately adds 1 back,
-            // so the counter converges back to 0 regardless of how many threads
-            // race through this branch simultaneously.
-            //
-            // memory_order_relaxed on the undo: we don't need any ordering
-            // guarantees here — we're just compensating our own overshoot.
-            room->available_tickets.fetch_add(1, std::memory_order_relaxed);
-
-            crow::json::wvalue sold_out;
-            sold_out["status"] = "SOLD_OUT";
-            conn.send_text(sold_out.dump());
-
-            CROW_LOG_INFO << "[SOLD_OUT] connection attempted booking, no seats left";
-        }
-    })
-
-    // ── ON CLOSE ──────────────────────────────────────────────────────────────
-    // Called by Crow when the WebSocket handshake completes or the client
-    // disconnects. After this handler returns, Crow frees the connection object.
-    // We must remove the pointer from the broadcast set BEFORE Crow frees it —
-    // otherwise broadcast_to_room() could send to a dangling pointer.
     .onclose([](crow::websocket::connection& conn, const std::string& reason) {
-        auto* room = conn.userdata<TatkalRoom>();
+        auto* room = static_cast<TatkalRoom*>(conn.userdata());
         if (!room) return;
 
-        // Erase under the conn_mutex so that any concurrent broadcast_to_room()
-        // that snapshots the set will either see or not see this pointer —
-        // but NEVER see it as a dangling pointer (the set is consistent at
-        // every point in time relative to the mutex).
         {
             std::lock_guard<std::mutex> lk(room->conn_mutex);
             room->connections.erase(&conn);
         }
 
-        CROW_LOG_INFO << "[LEAVE] room=" << room->room_id
-                      << " reason=" << reason;
+        CROW_LOG_INFO << "[LEAVE] room=" << room->room_id << " reason=" << reason;
     });
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // Launch
-    //
-    // multithreaded() spawns std::thread::hardware_concurrency() IO threads.
-    // On an 8-core IDX machine that's 8 threads — each handles one or more
-    // WebSocket connections via Asio's epoll reactor.
-    // ═════════════════════════════════════════════════════════════════════════
     CROW_LOG_INFO << "=================================================";
     CROW_LOG_INFO << "  Tatkal Race Engine  |  C++17 Atomic  |  :18080";
     CROW_LOG_INFO << "=================================================";
