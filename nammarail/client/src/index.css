@@ -7,7 +7,7 @@
      3. @tailwind utilities  → Utility classes
    ============================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Roboto+Slab:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -518,4 +518,364 @@ section {
   opacity: 0.55;
   color: var(--text-tertiary);
   pointer-events: none;
+}
+
+/* =============================================================================
+   TICKET DESIGN TOKENS — --tk- prefix, scoped to search results page
+   ============================================================================= */
+:root {
+  --tk-paper:         #FAF6EC;  /* page background — ticket stock cream */
+  --tk-paper-raised:  #FFFFFF;  /* card surface */
+  --tk-ink:           #2B2620;  /* primary text */
+  --tk-ink-muted:     #6B6354;  /* secondary text, captions */
+  --tk-navy:          #1C3155;  /* headers, train names, primary UI */
+  --tk-brass:         #B8862E;  /* accent — route line, active tab, CTA */
+  --tk-brass-soft:    #E7D8B5;  /* light brass tint for badges/backgrounds */
+  --tk-signal-green:  #2F6B4F;  /* available seats — verified WCAG AA */
+  --tk-signal-red:    #B23A2E;  /* waitlist / regret — verified WCAG AA */
+  --tk-track:         #D8D2C0;  /* hairlines, dividers, perforation */
+  --font-slab:        'Roboto Slab', Georgia, serif;
+}
+
+/* Legacy --sr-* palette — kept for backward compatibility */
+:root {
+  --sr-bg:           #0E1320;
+  --sr-card:         #F4F1E8;
+  --sr-card-border:  rgba(0, 0, 0, 0.09);
+  --sr-amber:        #D9952B;
+  --sr-amber-glow:   rgba(217, 149, 43, 0.18);
+  --sr-amber-tint:   rgba(217, 149, 43, 0.10);
+  --sr-green:        #3F8F5F;
+  --sr-green-tint:   rgba(63, 143, 95, 0.12);
+  --sr-red:          #C2492F;
+  --sr-red-tint:     rgba(194, 73, 47, 0.10);
+  --sr-slate:        #5A6B8C;
+  --sr-slate-tint:   rgba(90, 107, 140, 0.10);
+  --font-grotesk:    'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+  --font-mono:       'IBM Plex Mono', 'Courier New', monospace;
+  --font-body:       'Inter', 'Plus Jakarta Sans', sans-serif;
+}
+
+/* =============================================================================
+   SPLIT-FLAP TILE — Flip-reveal animation
+   Fires once on data load via .tile-data-loaded class on the parent container.
+   Clicking a tile does NOT replay — only a data fetch reset triggers it.
+   ============================================================================= */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sr-flip-in {
+  0%   { transform: perspective(400px) rotateX(-70deg); opacity: 0; }
+  50%  { transform: perspective(400px) rotateX(6deg);   opacity: 1; }
+  100% { transform: perspective(400px) rotateX(0deg);   opacity: 1; }
+}
+
+.tile-data-loaded .sr-tile {
+  animation: sr-flip-in 0.32s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* Respect user reduced-motion — disable seam animation entirely */
+@media (prefers-reduced-motion: reduce) {
+  .tile-data-loaded .sr-tile {
+    animation: none !important;
+  }
+}
+
+/* =============================================================================
+   SEARCH RESULTS PAGE — Full-bleed cream wrapper
+   Breaks out of container-app padding with negative margins.
+   Background: cream paper (--tk-paper), not dark indigo.
+   ============================================================================= */
+.sr-page-bleed {
+  margin-left:  -20px;
+  margin-right: -20px;
+  padding-left:  20px;
+  padding-right: 20px;
+  background:    var(--tk-paper);
+  color:         var(--tk-ink);
+  min-height:    calc(100vh - 64px);
+  padding-top:   28px;
+  padding-bottom: 60px;
+}
+
+@media (min-width: 768px) {
+  .sr-page-bleed {
+    margin-left:  -32px;
+    margin-right: -32px;
+    padding-left:  32px;
+    padding-right: 32px;
+  }
+}
+
+/* =============================================================================
+   SR CONTROL BAR — Ticket theme: light paper, navy + brass accents
+   ============================================================================= */
+.sr-control-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--tk-paper-raised);
+  border: 1px solid var(--tk-track);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
+.sr-control-label {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tk-ink-muted);
+  white-space: nowrap;
+}
+
+.sr-control-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--tk-track);
+  flex-shrink: 0;
+}
+
+.sr-sort-btn {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  background: transparent;
+  color: var(--tk-ink-muted);
+  white-space: nowrap;
+}
+.sr-sort-btn:hover:not(:disabled) {
+  background: var(--tk-track);
+  color: var(--tk-ink);
+}
+.sr-sort-btn.active {
+  background: var(--tk-navy);
+  color: #FAF6EC;
+  border-color: var(--tk-navy);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--tk-brass);
+}
+.sr-sort-btn:focus-visible {
+  outline: 2px solid var(--tk-brass);
+  outline-offset: 2px;
+}
+.sr-sort-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sr-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--tk-track);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  background: var(--tk-paper-raised);
+  color: var(--tk-ink-muted);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.sr-pill:hover {
+  background: var(--tk-track);
+  color: var(--tk-ink);
+  border-color: var(--tk-ink-muted);
+}
+.sr-pill.active {
+  background: var(--tk-brass-soft);
+  border-color: var(--tk-brass);
+  color: var(--tk-navy);
+  font-weight: 700;
+}
+.sr-pill:focus-visible {
+  outline: 2px solid var(--tk-brass);
+  outline-offset: 2px;
+}
+
+.sr-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tk-ink-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.12s ease, background 0.12s ease;
+  white-space: nowrap;
+}
+.sr-toggle:hover {
+  color: var(--tk-ink);
+  background: var(--tk-track);
+}
+.sr-toggle.active { color: var(--tk-signal-green); font-weight: 600; }
+.sr-toggle input  { accent-color: var(--tk-signal-green); }
+.sr-toggle:focus-within {
+  outline: 2px solid var(--tk-brass);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* =============================================================================
+   TICKET DESIGN SYSTEM — .tk-* component classes
+   ============================================================================= */
+
+/* Card wrapper — hover shifts border to brass, no lift/scale */
+.tk-card {
+  transition: border-color 0.15s ease;
+}
+
+/* Two-zone flex body: [LEFT] | [PERF] | [RIGHT] */
+.tk-ticket-body {
+  display: flex;
+  align-items: stretch;
+}
+
+/* Left zone — train identity (name, number, running days) */
+.tk-zone-left {
+  width: 200px;
+  flex-shrink: 0;
+  padding: 16px 16px;
+  background: var(--tk-paper-raised);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* Vertical perforation — dashed line dividing left from right zone */
+.tk-perf-v {
+  flex-shrink: 0;
+  width: 18px;
+  position: relative;
+  background: var(--tk-paper);
+  overflow: visible;
+  z-index: 0;
+}
+.tk-perf-v::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  border-left: 2px dashed var(--tk-track);
+}
+
+/* Right zone — route strip + class tabs + date grid + book now */
+.tk-zone-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Class tab button — IBM Plex Mono, stamped badge style */
+.tk-class-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--tk-track);
+  background: var(--tk-paper-raised);
+  color: var(--tk-ink-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tk-class-tab:hover {
+  background: var(--tk-track);
+  color: var(--tk-ink);
+}
+.tk-class-tab.active {
+  background: var(--tk-brass-soft);
+  border-color: var(--tk-brass);
+  color: var(--tk-navy);
+  font-weight: 700;
+}
+.tk-class-tab:focus-visible {
+  outline: 2px solid var(--tk-brass);
+  outline-offset: 2px;
+}
+
+/* Book Now — flat brass fill, cream text, no gradient, no glow */
+.tk-book-btn {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 4px;
+  border: none;
+  background: var(--tk-brass);
+  color: #FAF6EC;
+  letter-spacing: 0.01em;
+  transition: filter 0.12s ease;
+  white-space: nowrap;
+}
+.tk-book-btn:disabled {
+  background: var(--tk-track);
+  color: var(--tk-ink-muted);
+  cursor: not-allowed !important;
+}
+.tk-book-btn:focus-visible {
+  outline: 2px solid var(--tk-brass);
+  outline-offset: 2px;
+}
+
+/* =============================================================================
+   RESPONSIVE — ≤640px: ticket zones stack vertically
+   Perforation becomes a horizontal dashed line.
+   Date strip scrolls horizontally on mobile.
+   ============================================================================= */
+@media (max-width: 640px) {
+  .tk-ticket-body {
+    flex-direction: column;
+  }
+
+  .tk-zone-left {
+    width: 100%;
+    padding: 14px 16px 10px;
+    border-bottom: none;
+  }
+
+  /* Flip perf from vertical dashed line to horizontal */
+  .tk-perf-v {
+    width: 100%;
+    height: 18px;
+  }
+  .tk-perf-v::before {
+    top: 50%;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: 0;
+    transform: translateY(-50%);
+    border-left: none;
+    border-top: 2px dashed var(--tk-track);
+  }
+
+  .tk-zone-right {
+    width: 100%;
+  }
 }

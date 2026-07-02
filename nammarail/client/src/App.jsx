@@ -16,6 +16,10 @@ import MyBookingsPage          from './pages/MyBookingsPage';
 import LoginPage               from './pages/LoginPage';
 import RegisterPage            from './pages/RegisterPage';
 import BookingDetailPage       from './pages/BookingDetailPage';
+import TatkalArena             from './pages/TatkalArena';
+import PNRStatus               from './pages/PNRStatus';
+import Chart                   from './pages/Chart';
+import AIAssistant             from './components/chat/AIAssistant';
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 function NotFoundPage() {
@@ -56,15 +60,21 @@ export default function App() {
           <Route path="/booking-confirmation/:bookingId" element={
             <ProtectedRoute><BookingConfirmationPage /></ProtectedRoute>
           } />
+          <Route path="/pnr-status"                             element={<PNRStatus />} />
+          <Route path="/chart"                                  element={<Chart />} />
+          <Route path="/bookings/:bookingId" element={
+            <ProtectedRoute><BookingDetailPage /></ProtectedRoute>
+          } />
           <Route path="/my-bookings" element={
             <ProtectedRoute><MyBookingsPage /></ProtectedRoute>
           } />
-          <Route path="/bookings/:bookingId" element={
-            <ProtectedRoute><BookingDetailPage /></ProtectedRoute>
+          <Route path="/tatkal/:roomId" element={
+            <ProtectedRoute><TatkalArena /></ProtectedRoute>
           } />
 
           <Route path="*"                                       element={<NotFoundPage />} />
         </Routes>
+        <AIAssistant />
         </BrowserRouter>
       </AuthProvider>
     </ToastProvider>
