@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Layout from '../components/layout/Layout';
-import { tkAnimations } from '../utils/animations';
 
 export default function PNRStatus() {
   const [pnr, setPnr] = useState('');
@@ -68,7 +67,7 @@ export default function PNRStatus() {
             </button>
           </form>
           {error && (
-            <motion.div {...tkAnimations.slideUp} className="mt-4 p-3 rounded" style={{ background: 'var(--tk-signal-red)', color: 'white' }}>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 p-3 rounded" style={{ background: 'var(--tk-signal-red)', color: 'white' }}>
               {error}
             </motion.div>
           )}
@@ -76,7 +75,7 @@ export default function PNRStatus() {
 
         <AnimatePresence>
           {booking && (
-            <motion.div {...tkAnimations.fadeIn} className="tk-card p-8">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="tk-card p-8">
               <div className="flex justify-between items-center mb-6 border-b pb-4" style={{ borderColor: 'var(--tk-sand-dark)' }}>
                 <div>
                   <h2 className="text-xl font-bold uppercase" style={{ color: 'var(--tk-ink-muted)' }}>PNR Number</h2>

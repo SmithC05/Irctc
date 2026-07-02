@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Layout from '../components/layout/Layout';
-import { tkAnimations } from '../utils/animations';
 
 export default function Chart() {
   const [trainNumber, setTrainNumber] = useState('');
@@ -74,7 +73,7 @@ export default function Chart() {
             </button>
           </form>
           {error && (
-            <motion.div {...tkAnimations.slideUp} className="mt-4 p-3 rounded" style={{ background: 'var(--tk-signal-red)', color: 'white' }}>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 p-3 rounded" style={{ background: 'var(--tk-signal-red)', color: 'white' }}>
               {error}
             </motion.div>
           )}
@@ -82,7 +81,7 @@ export default function Chart() {
 
         <AnimatePresence>
           {chart && (
-            <motion.div {...tkAnimations.fadeIn} className="tk-card p-8">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="tk-card p-8">
               <h3 className="text-lg font-bold mb-4 uppercase tracking-widest" style={{ color: 'var(--tk-ink-muted)' }}>Confirmed & Waitlisted Passengers</h3>
               <div className="overflow-hidden rounded-lg border border-gray-200">
                 <table className="w-full text-left">
