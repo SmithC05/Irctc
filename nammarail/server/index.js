@@ -151,6 +151,21 @@ app.use('/api/tatkal', tatkalRoutes);
 app.use('/api/ai', aiRoutes);
 
 // ─────────────────────────────────────────────
+// Serve frontend in production
+// ─────────────────────────────────────────────
+const path = require('path');
+if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod') {
+  app.use(express.static(path.join(__dirname, '../client/dist')));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.resolve(__dirname, '../client/dist', 'index.html'));
+  });
+}
+
+// ─────────────────────────────────────────────
 // 404 handler — catches any route that doesn't match above
 // This middleware runs only if no earlier route handled the request.
 // `next` is not used here since this is the final fallback.
