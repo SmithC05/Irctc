@@ -60,9 +60,6 @@ export default function App() {
           <Route path="/booking-confirmation/:bookingId" element={
             <ProtectedRoute><BookingConfirmationPage /></ProtectedRoute>
           } />
-          <Route path="/bookings"                               element={
-            <ProtectedRoute><BookingsPage /></ProtectedRoute>
-          } />
           <Route path="/pnr-status"                             element={<PNRStatus />} />
           <Route path="/chart"                                  element={<Chart />} />
           <Route path="/bookings/:bookingId" element={
